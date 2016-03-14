@@ -79,10 +79,11 @@ public abstract class OCommandExecutorSQLAbstract extends OCommandExecutorAbstra
 
   protected long             timeoutMs                = OGlobalConfiguration.COMMAND_TIMEOUT.getValueAsLong();
   protected TIMEOUT_STRATEGY timeoutStrategy          = TIMEOUT_STRATEGY.EXCEPTION;
+  protected OStatement       preParsedStatement;
 
   /**
    * The command is replicated
-   * 
+   *
    * @return
    */
   public OCommandDistributedReplicateRequest.DISTRIBUTED_EXECUTION_MODE getDistributedExecutionMode() {
@@ -155,7 +156,7 @@ public abstract class OCommandExecutorSQLAbstract extends OCommandExecutorAbstra
     for (String clazz : iClassNames) {
       final OClass cls = ((OMetadataInternal) db.getMetadata()).getImmutableSchemaSnapshot().getClass(clazz);
       if (cls != null)
-        for (int clId : cls.getClusterIds()) {
+        for (int clId : cls.getPolymorphicClusterIds()) {
           // FILTER THE CLUSTER WHERE THE USER HAS THE RIGHT ACCESS
           if (clId > -1 && checkClusterAccess(db, db.getClusterNameById(clId)))
             clusters.add(db.getClusterNameById(clId).toLowerCase());
@@ -205,8 +206,8 @@ public abstract class OCommandExecutorSQLAbstract extends OCommandExecutorAbstra
   }
 
   protected boolean checkClusterAccess(final ODatabaseDocument db, final String iClusterName) {
-    return db.getUser() != null
-        && db.getUser().checkIfAllowed(ORule.ResourceGeneric.CLUSTER, iClusterName, getSecurityOperationType()) != null;
+    return db.getUser() == null
+        || db.getUser().checkIfAllowed(ORule.ResourceGeneric.CLUSTER, iClusterName, getSecurityOperationType()) != null;
   }
 
   protected void bindDefaultContextVariables() {
@@ -225,6 +226,7 @@ public abstract class OCommandExecutorSQLAbstract extends OCommandExecutorAbstra
       final OrientSql osql = new OrientSql(is);
       try {
         final OStatement result = osql.parse();
+        preParsedStatement = result;
 
         if (iRequest instanceof OCommandRequestAbstract) {
           final Map<Object, Object> params = ((OCommandRequestAbstract) iRequest).getParameters();
@@ -233,8 +235,7 @@ public abstract class OCommandExecutorSQLAbstract extends OCommandExecutorAbstra
 
         return result.toString();
       } catch (ParseException e) {
-        e.printStackTrace();// TODO remove this
-        throwParsingException(e.getMessage());
+        throwParsingException("Error parsing query: \n" + queryText + "\n" + e.getMessage());
       }
       return "ERROR!";
     }

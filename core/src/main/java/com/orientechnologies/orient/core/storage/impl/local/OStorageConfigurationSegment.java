@@ -19,8 +19,6 @@
  */
 package com.orientechnologies.orient.core.storage.impl.local;
 
-import java.io.IOException;
-
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.config.OStorageConfiguration;
 import com.orientechnologies.orient.core.config.OStorageFileConfiguration;
@@ -29,6 +27,8 @@ import com.orientechnologies.orient.core.serialization.OBinaryProtocol;
 import com.orientechnologies.orient.core.storage.ORawBuffer;
 import com.orientechnologies.orient.core.storage.fs.OFile;
 import com.orientechnologies.orient.core.storage.impl.local.paginated.OLocalPaginatedStorage;
+
+import java.io.IOException;
 
 /**
  * Handles the database configuration in one big record.
@@ -81,7 +81,7 @@ public class OStorageConfigurationSegment extends OStorageConfiguration {
 
       fromStream(buffer);
     } catch (Exception e) {
-      throw new OSerializationException("Cannot load database's configuration. The database seems to be corrupted.", e);
+      throw new OSerializationException("Cannot load database's configuration. The database seems corrupted", e);
     }
     return this;
   }
@@ -110,8 +110,8 @@ public class OStorageConfigurationSegment extends OStorageConfiguration {
 
       final int len = buffer.length + OBinaryProtocol.SIZE_INT;
 
-      if (len > f.getFilledUpTo())
-        f.allocateSpace(len - f.getFilledUpTo());
+      if (len > f.getFileSize())
+        f.allocateSpace(len - f.getFileSize());
 
       f.writeInt(0, buffer.length);
       f.write(OBinaryProtocol.SIZE_INT, buffer);
@@ -129,6 +129,5 @@ public class OStorageConfigurationSegment extends OStorageConfiguration {
 
   @Override
   public void setSoftlyClosed(boolean softlyClosed) throws IOException {
-    segment.getFile().setSoftlyClosed(softlyClosed);
   }
 }

@@ -24,7 +24,7 @@ import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OReadCache;
+import com.orientechnologies.orient.core.storage.cache.OReadCache;
 import com.orientechnologies.orient.core.index.sbtree.local.OSBTreeException;
 import com.orientechnologies.orient.core.storage.cache.OWriteCache;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
@@ -80,7 +80,7 @@ public class OIndexRIDContainer implements Set<OIdentifiable> {
     final OAbstractPaginatedStorage storage = (OAbstractPaginatedStorage) ODatabaseRecordThreadLocal.INSTANCE.get().getStorage()
         .getUnderlying();
     try {
-      final OAtomicOperation atomicOperation = storage.getAtomicOperationsManager().getCurrentOperation();
+      final OAtomicOperation atomicOperation = storage.getAtomicOperationsManager().startAtomicOperation(fileName, true);
       final OReadCache readCache = storage.getReadCache();
       final OWriteCache writeCache = storage.getWriteCache();
 
@@ -90,12 +90,23 @@ public class OIndexRIDContainer implements Set<OIdentifiable> {
 
         return readCache.addFile(fileName, writeCache);
       } else {
-        if (atomicOperation.isFileExists(fileName))
-          return atomicOperation.openFile(fileName);
+        long fileId;
 
-        return atomicOperation.addFile(fileName);
+        if (atomicOperation.isFileExists(fileName))
+          fileId = atomicOperation.openFile(fileName);
+        else
+          fileId = atomicOperation.addFile(fileName);
+
+        storage.getAtomicOperationsManager().endAtomicOperation(false, null);
+        return fileId;
       }
     } catch (IOException e) {
+      try {
+        storage.getAtomicOperationsManager().endAtomicOperation(true, e);
+      } catch (IOException ioe) {
+        throw new OSBTreeException("Error of rollback of atomic operation", ioe);
+      }
+
       throw new OSBTreeException("Error creation of sbtree with name " + fileName, e);
     }
   }
@@ -233,8 +244,8 @@ public class OIndexRIDContainer implements Set<OIdentifiable> {
 
   private void convertToSbTree() {
     final ODatabaseDocumentInternal db = ODatabaseRecordThreadLocal.INSTANCE.get();
-    final OIndexRIDContainerSBTree tree = new OIndexRIDContainerSBTree(fileId, durableNonTxMode,
-        (OAbstractPaginatedStorage) db.getStorage().getUnderlying());
+    final OIndexRIDContainerSBTree tree = new OIndexRIDContainerSBTree(fileId, durableNonTxMode, (OAbstractPaginatedStorage) db
+        .getStorage().getUnderlying());
 
     tree.addAll(underlying);
 

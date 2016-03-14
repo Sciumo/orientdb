@@ -19,24 +19,27 @@
  */
 package com.orientechnologies.orient.server;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Socket;
-
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.enterprise.channel.binary.OChannelBinary;
 import com.orientechnologies.orient.server.config.OServerUserConfiguration;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocol;
 import com.orientechnologies.orient.server.network.protocol.ONetworkProtocolData;
 
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 public class OClientConnection {
-  public final int                         id;
-  public final long                        since;
+  public final    int                      id;
+  public final    long                     since;
   public volatile ONetworkProtocol         protocol;
   public volatile ODatabaseDocumentTx      database;
   public volatile OServerUserConfiguration serverUser;
+  private Lock lock = new ReentrantLock();
 
-  public ONetworkProtocolData              data = new ONetworkProtocolData();
+  public ONetworkProtocolData data = new ONetworkProtocolData();
 
   public OClientConnection(final int id, final ONetworkProtocol protocol) throws IOException {
     this.id = id;
@@ -55,13 +58,23 @@ public class OClientConnection {
     }
   }
 
+  /**
+   * Acquires the connection. This is fundamental to manage concurrent requests using the same session id.
+   */
+  public void acquire() {
+    lock.lock();
+  }
+
+  /**
+   * Releases an acquired connection.
+   */
+  public void release() {
+    lock.unlock();
+  }
+
   @Override
   public String toString() {
-    return "OClientConnection [id="
-        + id
-        + ", source="
-        + (protocol != null && protocol.getChannel() != null && protocol.getChannel().socket != null ? protocol.getChannel().socket
-            .getRemoteSocketAddress() : "?") + ", since=" + since + "]";
+    return "OClientConnection [id=" + id + ", source=" + (protocol != null && protocol.getChannel() != null && protocol.getChannel().socket != null ? protocol.getChannel().socket.getRemoteSocketAddress() : "?") + ", since=" + since + "]";
   }
 
   /**

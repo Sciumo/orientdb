@@ -121,6 +121,11 @@ public class OIndexAbstractDelegate<T> implements OIndex<T> {
     return delegate.getType();
   }
 
+  @Override
+  public String getAlgorithm() {
+    return delegate.getAlgorithm();
+  }
+
   public boolean isAutomatic() {
     return delegate.isAutomatic();
   }
@@ -134,9 +139,6 @@ public class OIndexAbstractDelegate<T> implements OIndex<T> {
     return delegate.getMetadata();
   }
 
-  public ORID getIdentity() {
-    return delegate.getIdentity();
-  }
 
   public long rebuild() {
     return delegate.rebuild();

@@ -19,11 +19,8 @@
  */
 package com.orientechnologies.orient.core.metadata;
 
-import java.io.IOException;
-import java.util.concurrent.Callable;
-
 import com.orientechnologies.common.log.OLogManager;
-import com.orientechnologies.common.profiler.OProfilerMBean;
+import com.orientechnologies.common.profiler.OProfiler;
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.ODatabase;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
@@ -48,22 +45,26 @@ import com.orientechnologies.orient.core.schedule.OSchedulerListenerImpl;
 import com.orientechnologies.orient.core.schedule.OSchedulerListenerProxy;
 import com.orientechnologies.orient.core.storage.OStorageProxy;
 
+import java.io.IOException;
+import java.util.concurrent.Callable;
+
 public class OMetadataDefault implements OMetadataInternal {
-  public static final String            CLUSTER_INTERNAL_NAME     = "internal";
-  public static final String            CLUSTER_INDEX_NAME        = "index";
-  public static final String            CLUSTER_MANUAL_INDEX_NAME = "manindex";
+  public static final String        CLUSTER_INTERNAL_NAME     = "internal";
+  public static final String        CLUSTER_INDEX_NAME        = "index";
+  public static final String        CLUSTER_MANUAL_INDEX_NAME = "manindex";
 
-  protected int                         schemaClusterId;
+  protected int                     schemaClusterId;
 
-  protected OSchemaProxy                schema;
-  protected OSecurity                   security;
-  protected OIndexManagerProxy          indexManager;
-  protected OFunctionLibraryProxy       functionLibrary;
-  protected OSchedulerListenerProxy     scheduler;
-  protected static final OProfilerMBean PROFILER                  = Orient.instance().getProfiler();
+  protected OSchemaProxy            schema;
+  protected OSecurity               security;
+  protected OIndexManagerProxy      indexManager;
+  protected OFunctionLibraryProxy   functionLibrary;
+  protected OSchedulerListenerProxy scheduler;
 
-  private OImmutableSchema              immutableSchema           = null;
-  private int                           immutableCount            = 0;
+  protected static final OProfiler  PROFILER                  = Orient.instance().getProfiler();
+
+  private OImmutableSchema          immutableSchema           = null;
+  private int                       immutableCount            = 0;
 
   public OMetadataDefault() {
   }
@@ -200,7 +201,7 @@ public class OMetadataDefault implements OMetadataInternal {
         new Callable<OFunctionLibrary>() {
           public OFunctionLibrary call() {
             final OFunctionLibraryImpl instance = new OFunctionLibraryImpl();
-            if (iLoad)
+            if (iLoad && !(database.getStorage() instanceof OStorageProxy))
               instance.load();
             return instance;
           }
@@ -209,7 +210,7 @@ public class OMetadataDefault implements OMetadataInternal {
         new Callable<OSchedulerListener>() {
           public OSchedulerListener call() {
             final OSchedulerListenerImpl instance = new OSchedulerListenerImpl();
-            if (iLoad)
+            if (iLoad && !(database.getStorage() instanceof OStorageProxy))
               instance.load();
             return instance;
           }

@@ -37,6 +37,9 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import com.orientechnologies.common.log.OLogManager;
+import com.orientechnologies.orient.core.OOrientShutdownListener;
+import com.orientechnologies.orient.core.OOrientStartupListener;
+import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.OHookReplacedRecordThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
@@ -60,11 +63,25 @@ import com.orientechnologies.orient.core.version.ORecordVersion;
  * 
  * @author Andrey Lomakin, Artem Orobets
  */
-public class OClassIndexManager extends ODocumentHookAbstract {
-  private final ThreadLocal<Deque<TreeMap<OIndex<?>, List<Object>>>> lockedKeys = new ThreadLocal<Deque<TreeMap<OIndex<?>, List<Object>>>>();
+public class OClassIndexManager extends ODocumentHookAbstract implements OOrientStartupListener, OOrientShutdownListener {
+  private volatile ThreadLocal<Deque<TreeMap<OIndex<?>, List<Object>>>> lockedKeys = new ThreadLocal<Deque<TreeMap<OIndex<?>, List<Object>>>>();
 
   public OClassIndexManager(ODatabaseDocument database) {
     super(database);
+
+    Orient.instance().registerWeakOrientStartupListener(this);
+    Orient.instance().registerWeakOrientShutdownListener(this);
+  }
+
+  @Override
+  public void onShutdown() {
+    lockedKeys = null;
+  }
+
+  @Override
+  public void onStartup() {
+    if (lockedKeys == null)
+      lockedKeys = new ThreadLocal<Deque<TreeMap<OIndex<?>, List<Object>>>>();
   }
 
   private static void processCompositeIndexUpdate(final OIndex<?> index, final Set<String> dirtyFields, final ODocument iRecord) {
@@ -349,8 +366,8 @@ public class OClassIndexManager extends ODocumentHookAbstract {
 
     for (final OIndex<?> index : indexes) {
 
-      if (index instanceof OIndexUnique) {
-        final OIndexRecorder indexRecorder = new OIndexRecorder((OIndexUnique) index);
+      if (index.getInternal() instanceof OIndexUnique) {
+        final OIndexRecorder indexRecorder = new OIndexRecorder((OIndexInternal<OIdentifiable>)index.getInternal());
         processIndexUpdate(record, dirtyFields, indexRecorder);
 
         indexKeysMap.put(index, indexRecorder.getAffectedKeys());
@@ -378,7 +395,7 @@ public class OClassIndexManager extends ODocumentHookAbstract {
       try {
         return (ODocument) iRecord.load();
       } catch (final ORecordNotFoundException e) {
-        throw new OIndexException("Error during loading of record with id : " + iRecord.getIdentity());
+        throw new OIndexException("Error during loading of record with id : " + iRecord.getIdentity(), e);
       }
     }
     return iRecord;
@@ -441,7 +458,14 @@ public class OClassIndexManager extends ODocumentHookAbstract {
 
       if (!dirtyFields.isEmpty()) {
         for (final OIndex<?> index : indexes) {
-          processIndexUpdate(iDocument, dirtyFields, index);
+          try {
+            processIndexUpdate(iDocument, dirtyFields, index);
+          } catch (ORecordDuplicatedException ex) {
+            iDocument.undo();
+            iDocument.setDirty();
+            database.save(iDocument);
+            throw ex;
+          }
         }
       }
     }

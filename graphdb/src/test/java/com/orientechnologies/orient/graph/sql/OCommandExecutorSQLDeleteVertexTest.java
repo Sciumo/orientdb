@@ -70,7 +70,7 @@ public class OCommandExecutorSQLDeleteVertexTest {
   }
 
   @Test
-  public void testDeteleVertexLimit() throws Exception {
+  public void testDeleteVertexLimit() throws Exception {
     // for issue #4148
 
     for (int i = 0; i < 10; i++) {
@@ -83,4 +83,51 @@ public class OCommandExecutorSQLDeleteVertexTest {
     Assert.assertEquals(result.size(), 6);
 
   }
+
+  @Test
+  public void testDeleteVertexBatch() throws Exception {
+    // for issue #4622
+
+    for (int i = 0; i < 100; i++) {
+      db.command(new OCommandSQL("create vertex User set name = 'foo" + i + "'")).execute();
+    }
+
+    final int res = (Integer) db.command(new OCommandSQL("delete vertex User batch 5")).execute();
+
+    List<?> result = db.query(new OSQLSynchQuery("select from User"));
+    Assert.assertEquals(result.size(), 0);
+
+  }
+
+  @Test
+  public void testDeleteVertexFromSubquery() throws Exception {
+    // for issue #4523
+
+    for (int i = 0; i < 100; i++) {
+      db.command(new OCommandSQL("create vertex User set name = 'foo" + i + "'")).execute();
+    }
+
+    final int res = (Integer) db.command(new OCommandSQL("delete vertex from (select from User)")).execute();
+
+    List<?> result = db.query(new OSQLSynchQuery("select from User"));
+    Assert.assertEquals(result.size(), 0);
+
+  }
+
+  @Test
+  public void testDeleteVertexFromSubquery2() throws Exception {
+    // for issue #4523
+
+    for (int i = 0; i < 100; i++) {
+      db.command(new OCommandSQL("create vertex User set name = 'foo" + i + "'")).execute();
+    }
+
+    final int res = (Integer) db.command(new OCommandSQL("delete vertex from (select from User where name = 'foo10')")).execute();
+
+    List<?> result = db.query(new OSQLSynchQuery("select from User"));
+    Assert.assertEquals(result.size(), 99);
+
+  }
+
+
 }

@@ -67,6 +67,10 @@ public class OTransactionNoTx extends OTransactionAbstract {
   }
 
   @Override
+  public void restore() {
+  }
+
+  @Override
   public void commit(boolean force) {
   }
 
@@ -79,15 +83,25 @@ public class OTransactionNoTx extends OTransactionAbstract {
     if (iRid.isNew())
       return null;
 
-    return database.executeReadRecord((ORecordId) iRid, iRecord, null, iFetchPlan, ignoreCache, loadTombstone, iLockingStrategy,
-        new ODatabaseDocumentTx.SimpleRecordReader());
+    return database.executeReadRecord((ORecordId) iRid, iRecord, null, iFetchPlan, ignoreCache, !ignoreCache, loadTombstone,
+        iLockingStrategy, new ODatabaseDocumentTx.SimpleRecordReader());
+  }
+
+  @Deprecated
+  public ORecord loadRecord(final ORID iRid, final ORecord iRecord, final String iFetchPlan, final boolean ignoreCache,
+      final boolean iUpdateCache, final boolean loadTombstone, final OStorage.LOCKING_STRATEGY iLockingStrategy) {
+    if (iRid.isNew())
+      return null;
+
+    return database.executeReadRecord((ORecordId) iRid, iRecord, null, iFetchPlan, ignoreCache, iUpdateCache, loadTombstone,
+        iLockingStrategy, new ODatabaseDocumentTx.SimpleRecordReader());
   }
 
   public ORecord loadRecord(final ORID iRid, final ORecord iRecord, final String iFetchPlan, final boolean ignoreCache) {
     if (iRid.isNew())
       return null;
 
-    return database.executeReadRecord((ORecordId) iRid, iRecord, null, iFetchPlan, ignoreCache, false,
+    return database.executeReadRecord((ORecordId) iRid, iRecord, null, iFetchPlan, ignoreCache, !ignoreCache, false,
         OStorage.LOCKING_STRATEGY.NONE, new ODatabaseDocumentTx.SimpleRecordReader());
   }
 
@@ -101,28 +115,23 @@ public class OTransactionNoTx extends OTransactionAbstract {
     if (rid.isNew())
       return null;
 
-    try {
-      final ODatabaseDocumentTx.RecordReader recordReader;
-      if (force) {
-        recordReader = new ODatabaseDocumentTx.SimpleRecordReader();
-      } else {
-        recordReader = new ODatabaseDocumentTx.LatestVersionRecordReader();
-      }
+    final ODatabaseDocumentTx.RecordReader recordReader;
+    if (force) {
+      recordReader = new ODatabaseDocumentTx.SimpleRecordReader();
+    } else {
+      recordReader = new ODatabaseDocumentTx.LatestVersionRecordReader();
+    }
 
-      final ORecord loadedRecord = database.executeReadRecord((ORecordId) rid, record, null, fetchPlan, ignoreCache, false,
-          OStorage.LOCKING_STRATEGY.NONE, recordReader);
+    final ORecord loadedRecord = database.executeReadRecord((ORecordId) rid, record, null, fetchPlan, ignoreCache, !ignoreCache,
+        false, OStorage.LOCKING_STRATEGY.NONE, recordReader);
 
-      if (force) {
-        return loadedRecord;
-      } else {
-        if (loadedRecord == null)
-          return record;
+    if (force) {
+      return loadedRecord;
+    } else {
+      if (loadedRecord == null)
+        return record;
 
-        return loadedRecord;
-      }
-
-    } catch (ORecordNotFoundException e) {
-      return null;
+      return loadedRecord;
     }
   }
 
@@ -132,7 +141,7 @@ public class OTransactionNoTx extends OTransactionAbstract {
     if (rid.isNew())
       return null;
 
-    return database.executeReadRecord((ORecordId) rid, null, recordVersion, fetchPlan, ignoreCache, false,
+    return database.executeReadRecord((ORecordId) rid, null, recordVersion, fetchPlan, ignoreCache, !ignoreCache, false,
         OStorage.LOCKING_STRATEGY.NONE, new ODatabaseDocumentTx.LatestVersionRecordReader());
   }
 

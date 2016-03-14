@@ -21,8 +21,6 @@
 package com.orientechnologies.orient.core.storage.cache;
 
 import com.orientechnologies.orient.core.command.OCommandOutputListener;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OCachePointer;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OPageDataVerificationError;
 import com.orientechnologies.orient.core.storage.impl.local.OLowDiskSpaceListener;
 
 import java.io.IOException;
@@ -69,17 +67,11 @@ public interface OWriteCache {
 
   long getFilledUpTo(long fileId) throws IOException;
 
-  long getAllocatedPages();
+  long getExclusiveWriteCachePagesSize();
 
   boolean isOpen(long fileId);
 
   Long isOpen(String fileName) throws IOException;
-
-  void setSoftlyClosed(long fileId, boolean softlyClosed) throws IOException;
-
-  void setSoftlyClosed(boolean softlyClosed) throws IOException;
-
-  boolean wasSoftlyClosed(long fileId) throws IOException;
 
   void deleteFile(long fileId) throws IOException;
 

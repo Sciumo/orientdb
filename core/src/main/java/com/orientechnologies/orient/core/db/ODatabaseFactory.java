@@ -19,6 +19,7 @@
  */
 package com.orientechnologies.orient.core.db;
 
+import com.orientechnologies.common.exception.OException;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
@@ -94,6 +95,7 @@ public class ODatabaseFactory {
           instances.size());
 
       for (ODatabase<?> db : new HashSet<ODatabase<?>>(instances.keySet())) {
+        db.activateOnCurrentThread();
         if (db != null && !db.isClosed()) {
           db.close();
         }
@@ -131,28 +133,37 @@ public class ODatabaseFactory {
 
   public void checkSchema(final ODatabase<?> iDatabase) {
     // FORCE NON DISTRIBUTION ON CREATION
-    OScenarioThreadLocal.INSTANCE.set(OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED);
+    OScenarioThreadLocal.INSTANCE.setRunMode(OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED);
     try {
 
-      // iDatabase.getMetadata().getSchema().getOrCreateClass(OMVRBTreeRIDProvider.PERSISTENT_CLASS_NAME);
-
       final OSchema schema = iDatabase.getMetadata().getSchema();
+      OClass vertexBaseClass;
 
-      schema.reload();
-
-      OClass vertexBaseClass = schema.getClass("V");
-      OClass edgeBaseClass = schema.getClass("E");
-
-      if (vertexBaseClass == null) {
-        // CREATE THE META MODEL USING THE ORIENT SCHEMA
-        vertexBaseClass = schema.createClass("V");
-        vertexBaseClass.setOverSize(2);
+      try {
+        vertexBaseClass = schema.getOrCreateClass("V");
+      } catch (OException e) {
+        // that is possible in case of remote client connection.
+        schema.reload();
+        vertexBaseClass = schema.getOrCreateClass("V");
       }
 
-      if (edgeBaseClass == null)
-        schema.createClass("E");
+      OClass edgeBaseClass;
+
+      try {
+        edgeBaseClass = schema.getOrCreateClass("E");
+      } catch (OException e) {
+        // that is possible in case of remote client connection
+        schema.reload();
+        edgeBaseClass = schema.getOrCreateClass("E");
+      }
+
+      assert edgeBaseClass != null;
+      assert vertexBaseClass != null;
+
+      if (vertexBaseClass.getOverSize() < 2)
+        vertexBaseClass.setOverSize(2);
     } finally {
-      OScenarioThreadLocal.INSTANCE.set(OScenarioThreadLocal.RUN_MODE.DEFAULT);
+      OScenarioThreadLocal.INSTANCE.setRunMode(OScenarioThreadLocal.RUN_MODE.DEFAULT);
     }
   }
 }

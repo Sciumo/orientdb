@@ -31,6 +31,7 @@ import com.orientechnologies.orient.core.engine.memory.OEngineMemory;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
 import com.orientechnologies.orient.core.exception.OSchemaException;
+import com.orientechnologies.orient.core.exception.OStorageException;
 import com.orientechnologies.orient.core.exception.OTransactionException;
 import com.orientechnologies.orient.core.hook.ORecordHook.RESULT;
 import com.orientechnologies.orient.core.hook.ORecordHook.TYPE;
@@ -54,7 +55,11 @@ import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 import com.orientechnologies.orient.core.version.ORecordVersion;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -62,8 +67,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class OTransactionOptimistic extends OTransactionRealAbstract {
   private static AtomicInteger txSerial = new AtomicInteger();
 
-  private boolean              usingLog = true;
-  private int                  txStartCounter;
+  private boolean usingLog = true;
+  private int     txStartCounter;
 
   private class CommitIndexesCallback implements Runnable {
     private final Map<String, OIndex<?>> indexes;
@@ -112,6 +117,9 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
   }
 
   public void begin() {
+    if (txStartCounter < 0)
+      throw new OTransactionException("Invalid value of TX counter.");
+
     if (txStartCounter == 0)
       status = TXSTATUS.BEGUN;
 
@@ -135,6 +143,9 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
   @Override
   public void commit(final boolean force) {
     checkTransaction();
+
+    if (txStartCounter < 0)
+      throw new OStorageException("Invalid value of tx counter");
 
     if (force)
       txStartCounter = 0;
@@ -160,6 +171,9 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
 
   @Override
   public void rollback(boolean force, int commitLevelDiff) {
+    if (txStartCounter < 0)
+      throw new OStorageException("Invalid value of TX counter");
+
     checkTransaction();
 
     txStartCounter += commitLevelDiff;
@@ -200,6 +214,11 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
 
   public ORecord loadRecord(final ORID rid, final ORecord iRecord, final String fetchPlan, final boolean ignoreCache,
       final boolean loadTombstone, final OStorage.LOCKING_STRATEGY lockingStrategy) {
+    return loadRecord(rid, iRecord, fetchPlan, ignoreCache, true, loadTombstone, lockingStrategy);
+  }
+
+  public ORecord loadRecord(final ORID rid, final ORecord iRecord, final String fetchPlan, final boolean ignoreCache,
+      final boolean iUpdateCache, final boolean loadTombstone, final OStorage.LOCKING_STRATEGY lockingStrategy) {
     checkTransaction();
 
     final ORecord txRecord = getRecord(rid);
@@ -209,11 +228,11 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
 
     if (txRecord != null) {
       if (iRecord != null && txRecord != iRecord)
-        OLogManager.instance().warn(
-            this,
+        OLogManager.instance().warn(this,
             "Found record in transaction with the same RID %s but different instance. "
                 + "Probably the record has been loaded from another transaction and reused on the current one: reload it "
-                + "from current transaction before to update or delete it", iRecord.getIdentity());
+                + "from current transaction before to update or delete it",
+            iRecord.getIdentity());
       return txRecord;
     }
 
@@ -221,7 +240,7 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
       return null;
 
     // DELEGATE TO THE STORAGE, NO TOMBSTONES SUPPORT IN TX MODE
-    final ORecord record = database.executeReadRecord((ORecordId) rid, iRecord, null, fetchPlan, ignoreCache, false,
+    final ORecord record = database.executeReadRecord((ORecordId) rid, iRecord, null, fetchPlan, ignoreCache, iUpdateCache, false,
         lockingStrategy, new ODatabaseDocumentTx.SimpleRecordReader());
 
     if (record != null && isolationLevel == ISOLATION_LEVEL.REPEATABLE_READ)
@@ -252,8 +271,8 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
       throw new ORecordNotFoundException("Record with id " + rid + " was not found in database.");
 
     // DELEGATE TO THE STORAGE, NO TOMBSTONES SUPPORT IN TX MODE
-    final ORecord record = database.executeReadRecord((ORecordId) rid, null, recordVersion, fetchPlan, ignoreCache, false,
-        OStorage.LOCKING_STRATEGY.NONE, new ODatabaseDocumentTx.SimpleRecordReader());
+    final ORecord record = database.executeReadRecord((ORecordId) rid, null, recordVersion, fetchPlan, ignoreCache, !ignoreCache,
+        false, OStorage.LOCKING_STRATEGY.NONE, new ODatabaseDocumentTx.SimpleRecordReader());
 
     if (record != null && isolationLevel == ISOLATION_LEVEL.REPEATABLE_READ)
       // KEEP THE RECORD IN TX TO ASSURE REPEATABLE READS
@@ -278,11 +297,11 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
 
     if (txRecord != null) {
       if (passedRecord != null && txRecord != passedRecord)
-        OLogManager.instance().warn(
-            this,
+        OLogManager.instance().warn(this,
             "Found record in transaction with the same RID %s but different instance. "
                 + "Probably the record has been loaded from another transaction and reused on the current one: reload it "
-                + "from current transaction before to update or delete it", passedRecord.getIdentity());
+                + "from current transaction before to update or delete it",
+            passedRecord.getIdentity());
       return txRecord;
     }
 
@@ -299,8 +318,8 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
         recordReader = new ODatabaseDocumentTx.LatestVersionRecordReader();
       }
 
-      ORecord loadedRecord = database.executeReadRecord((ORecordId) rid, passedRecord, null, fetchPlan, ignoreCache, false,
-          OStorage.LOCKING_STRATEGY.NONE, recordReader);
+      ORecord loadedRecord = database.executeReadRecord((ORecordId) rid, passedRecord, null, fetchPlan, ignoreCache, !ignoreCache,
+          false, OStorage.LOCKING_STRATEGY.NONE, recordReader);
 
       if (force) {
         record = loadedRecord;
@@ -339,8 +358,8 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
       final ORecordCallback<? extends Number> iRecordCreatedCallback, ORecordCallback<ORecordVersion> iRecordUpdatedCallback) {
     if (iRecord == null)
       return null;
-    final byte operation = iForceCreate ? ORecordOperation.CREATED : iRecord.getIdentity().isValid() ? ORecordOperation.UPDATED
-        : ORecordOperation.CREATED;
+    final byte operation = iForceCreate ? ORecordOperation.CREATED
+        : iRecord.getIdentity().isValid() ? ORecordOperation.UPDATED : ORecordOperation.CREATED;
     addRecord(iRecord, operation, iClusterName);
     return iRecord;
   }
@@ -429,12 +448,9 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
             final String clusterName = getDatabase().getClusterNameById(iRecord.getIdentity().getClusterId());
             if (!clusterName.equals(OMetadataDefault.CLUSTER_MANUAL_INDEX_NAME)
                 && !clusterName.equals(OMetadataDefault.CLUSTER_INDEX_NAME))
-              OLogManager
-                  .instance()
-                  .warn(
-                      this,
-                      "Found record in transaction with the same RID %s but different instance. Probably the record has been loaded from another transaction and reused on the current one: reload it from current transaction before to update or delete it",
-                      iRecord.getIdentity());
+              OLogManager.instance().warn(this,
+                  "Found record in transaction with the same RID %s but different instance. Probably the record has been loaded from another transaction and reused on the current one: reload it from current transaction before to update or delete it",
+                  iRecord.getIdentity());
 
             txRecord.record = iRecord;
             txRecord.type = iStatus;
@@ -567,12 +583,12 @@ public class OTransactionOptimistic extends OTransactionRealAbstract {
 
   private void doCommit() {
     if (status == TXSTATUS.ROLLED_BACK || status == TXSTATUS.ROLLBACKING)
-      throw new ORollbackException("Given transaction was rolled back and can not be used.");
+      throw new ORollbackException("Given transaction was rolled back and cannot be used.");
 
     status = TXSTATUS.COMMITTING;
 
     if (!recordEntries.isEmpty() || !indexEntries.isEmpty()) {
-      if (OScenarioThreadLocal.INSTANCE.get() != RUN_MODE.RUNNING_DISTRIBUTED
+      if (OScenarioThreadLocal.INSTANCE.getRunMode() == RUN_MODE.DEFAULT
           && !(database.getStorage().getUnderlying() instanceof OAbstractPaginatedStorage))
         database.getStorage().commit(this, null);
       else {

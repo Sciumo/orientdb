@@ -24,7 +24,6 @@ import com.orientechnologies.orient.core.command.OCommandRequest;
 import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
-import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.impl.ODocument;
@@ -73,17 +72,17 @@ public abstract class OIndexRemote<T> implements OIndex<T> {
   private final static String   QUERY_DROP                                        = "drop index %s";
   protected final String        databaseName;
   private final String          wrappedType;
-  private final ORID            rid;
+  private final String          algorithm;
   protected OIndexDefinition    indexDefinition;
   protected String              name;
   protected ODocument           configuration;
   protected Set<String>         clustersToIndex;
 
-  public OIndexRemote(final String iName, final String iWrappedType, final ORID iRid, final OIndexDefinition iIndexDefinition,
-      final ODocument iConfiguration, final Set<String> clustersToIndex) {
+  public OIndexRemote(final String iName, final String iWrappedType, final String algorithm,
+      final OIndexDefinition iIndexDefinition, final ODocument iConfiguration, final Set<String> clustersToIndex) {
     this.name = iName;
     this.wrappedType = iWrappedType;
-    this.rid = iRid;
+    this.algorithm = algorithm;
     this.indexDefinition = iIndexDefinition;
     this.configuration = iConfiguration;
     this.clustersToIndex = new HashSet<String>(clustersToIndex);
@@ -230,6 +229,10 @@ public abstract class OIndexRemote<T> implements OIndex<T> {
     return wrappedType;
   }
 
+  public String getAlgorithm() {
+    return algorithm;
+  }
+
   public ODocument getConfiguration() {
     return configuration;
   }
@@ -237,10 +240,6 @@ public abstract class OIndexRemote<T> implements OIndex<T> {
   @Override
   public ODocument getMetadata() {
     return configuration.field("metadata", OType.EMBEDDED);
-  }
-
-  public ORID getIdentity() {
-    return rid;
   }
 
   public void commit(final ODocument iDocument) {

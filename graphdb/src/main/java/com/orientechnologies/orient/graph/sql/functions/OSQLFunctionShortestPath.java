@@ -20,13 +20,13 @@
 package com.orientechnologies.orient.graph.sql.functions;
 
 import com.orientechnologies.common.collection.OMultiValue;
-import com.orientechnologies.common.types.OModifiableBoolean;
 import com.orientechnologies.orient.core.command.OCommandContext;
-import com.orientechnologies.orient.core.db.ODatabaseDocumentInternal;
-import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.command.OCommandExecutorAbstract;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
+import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.record.ORecord;
+import com.orientechnologies.orient.core.record.impl.ODocument;
 import com.orientechnologies.orient.core.sql.OSQLHelper;
 import com.orientechnologies.orient.core.sql.functions.math.OSQLFunctionMathAbstract;
 import com.orientechnologies.orient.graph.sql.OGraphCommandExecutorSQLFactory;
@@ -35,164 +35,268 @@ import com.tinkerpop.blueprints.Vertex;
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph;
 import com.tinkerpop.blueprints.impls.orient.OrientVertex;
 
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Shortest path algorithm to find the shortest path from one node to another node in a directed graph.
- * 
+ *
  * @author Luca Garulli (l.garulli--at--orientechnologies.com)
- * 
  */
 public class OSQLFunctionShortestPath extends OSQLFunctionMathAbstract {
-  public static final String   NAME     = "shortestPath";
+  public static final String NAME = "shortestPath";
+  public static final String PARAM_MAX_DEPTH = "maxDepth";
 
   protected static final float DISTANCE = 1f;
 
   public OSQLFunctionShortestPath() {
-    super(NAME, 2, 4);
+    super(NAME, 2, 5);
   }
 
-  public List<ORID> execute(Object iThis, final OIdentifiable iCurrentRecord, Object iCurrentResult, final Object[] iParams,
+  private class OShortestPathContext {
+    OrientVertex sourceVertex;
+    OrientVertex destinationVertex;
+    Direction directionLeft  = Direction.BOTH;
+    Direction directionRight = Direction.BOTH;
+
+    String   edgeType;
+    String[] edgeTypeParam;
+
+    ArrayDeque<OrientVertex> queueLeft  = new ArrayDeque<OrientVertex>();
+    ArrayDeque<OrientVertex> queueRight = new ArrayDeque<OrientVertex>();
+
+    final Set<ORID> leftVisited  = new HashSet<ORID>();
+    final Set<ORID> rightVisited = new HashSet<ORID>();
+
+    final Map<ORID, ORID> previouses = new HashMap<ORID, ORID>();
+    final Map<ORID, ORID> nexts      = new HashMap<ORID, ORID>();
+
+    OrientVertex current;
+    OrientVertex currentRight;
+    public Integer maxDepth;
+  }
+
+  public List<ORID> execute(Object iThis, final OIdentifiable iCurrentRecord, final Object iCurrentResult, final Object[] iParams,
       final OCommandContext iContext) {
-    final OModifiableBoolean shutdownFlag = new OModifiableBoolean();
-    ODatabaseDocumentInternal curDb = ODatabaseRecordThreadLocal.INSTANCE.get();
-    final OrientBaseGraph graph = OGraphCommandExecutorSQLFactory.getGraph(false, shutdownFlag);
-    try {
-      final ORecord record = (ORecord) (iCurrentRecord != null ? iCurrentRecord.getRecord() : null);
 
-      Object source = iParams[0];
-      if (OMultiValue.isMultiValue(source)) {
-        if (OMultiValue.getSize(source) > 1)
-          throw new IllegalArgumentException("Only one sourceVertex is allowed");
-        source = OMultiValue.getFirstValue(source);
-      }
-      OrientVertex sourceVertex = graph.getVertex(OSQLHelper.getValue(source, record, iContext));
+    return OGraphCommandExecutorSQLFactory.runWithAnyGraph(new OGraphCommandExecutorSQLFactory.GraphCallBack<List<ORID>>() {
+      @Override
+      public List<ORID> call(final OrientBaseGraph graph) {
+        final ORecord record = iCurrentRecord != null ? iCurrentRecord.getRecord() : null;
 
-      Object dest = iParams[1];
-      if (OMultiValue.isMultiValue(dest)) {
-        if (OMultiValue.getSize(dest) > 1)
-          throw new IllegalArgumentException("Only one destinationVertex is allowed");
-        dest = OMultiValue.getFirstValue(dest);
-      }
-      OrientVertex destinationVertex = graph.getVertex(OSQLHelper.getValue(dest, record, iContext));
+        final OShortestPathContext ctx = new OShortestPathContext();
 
-      if (sourceVertex.equals(destinationVertex)) {
-        final List<ORID> result = new ArrayList<ORID>(1);
-        result.add(destinationVertex.getIdentity());
-        return result;
-      }
+        Object source = iParams[0];
+        if (OMultiValue.isMultiValue(source)) {
+          if (OMultiValue.getSize(source) > 1)
+            throw new IllegalArgumentException("Only one sourceVertex is allowed");
+          source = OMultiValue.getFirstValue(source);
+        }
+        ctx.sourceVertex = graph.getVertex(OSQLHelper.getValue(source, record, iContext));
 
-      Direction direction = Direction.BOTH;
-      Direction reverseDirection = Direction.BOTH;
-      if (iParams.length > 2 && iParams[2] != null) {
-        direction = Direction.valueOf(iParams[2].toString().toUpperCase());
-      }
-      if (direction == Direction.OUT) {
-        reverseDirection = Direction.IN;
-      } else if (direction == Direction.IN) {
-        reverseDirection = Direction.OUT;
-      }
+        Object dest = iParams[1];
+        if (OMultiValue.isMultiValue(dest)) {
+          if (OMultiValue.getSize(dest) > 1)
+            throw new IllegalArgumentException("Only one destinationVertex is allowed");
+          dest = OMultiValue.getFirstValue(dest);
+        }
+        ctx.destinationVertex = graph.getVertex(OSQLHelper.getValue(dest, record, iContext));
 
-      String edgeType = null;
-      if (iParams.length > 3) {
-        edgeType = iParams[3] == null ? null : "" + iParams[3];
-      }
-      String[] edgeTypeParam = new String[] { edgeType };
-
-      ArrayDeque<OrientVertex> queue1 = new ArrayDeque<OrientVertex>();
-      ArrayDeque<OrientVertex> queue2 = new ArrayDeque<OrientVertex>();
-
-      final Set<ORID> leftVisited = new HashSet<ORID>();
-      final Set<ORID> rightVisited = new HashSet<ORID>();
-
-      final Map<ORID, ORID> previouses = new HashMap<ORID, ORID>();
-      final Map<ORID, ORID> nexts = new HashMap<ORID, ORID>();
-
-      queue1.add(sourceVertex);
-      leftVisited.add(sourceVertex.getIdentity());
-
-      queue2.add(destinationVertex);
-      rightVisited.add(destinationVertex.getIdentity());
-
-      OrientVertex current;
-      OrientVertex reverseCurrent;
-
-
-
-      while (true) {
-        if (queue1.isEmpty() && queue2.isEmpty()) {
-          break;
+        if (ctx.sourceVertex.equals(ctx.destinationVertex)) {
+          final List<ORID> result = new ArrayList<ORID>(1);
+          result.add(ctx.destinationVertex.getIdentity());
+          return result;
         }
 
-        ArrayDeque<OrientVertex> nextLevelQueue = new ArrayDeque<OrientVertex>();
-        while (!queue1.isEmpty()) {
-          current = queue1.poll();
+        if (iParams.length > 2 && iParams[2] != null) {
+          ctx.directionLeft = Direction.valueOf(iParams[2].toString().toUpperCase());
+        }
+        if (ctx.directionLeft == Direction.OUT) {
+          ctx.directionRight = Direction.IN;
+        } else if (ctx.directionLeft == Direction.IN) {
+          ctx.directionRight = Direction.OUT;
+        }
 
-          Iterable<Vertex> neighbors;
-          if (edgeType == null) {
-            neighbors = current.getVertices(direction);
+        ctx.edgeType = null;
+        if (iParams.length > 3) {
+          ctx.edgeType = iParams[3] == null ? null : "" + iParams[3];
+        }
+        ctx.edgeTypeParam = new String[] { ctx.edgeType };
+
+        if (iParams.length > 4) {
+          bindAdditionalParams(iParams[4], ctx);
+        }
+
+        ctx.queueLeft.add(ctx.sourceVertex);
+        ctx.leftVisited.add(ctx.sourceVertex.getIdentity());
+
+        ctx.queueRight.add(ctx.destinationVertex);
+        ctx.rightVisited.add(ctx.destinationVertex.getIdentity());
+
+        int depth = 1;
+        while (true) {
+          if (ctx.maxDepth != null && ctx.maxDepth <= depth) {
+            break;
+          }
+          if (ctx.queueLeft.isEmpty() || ctx.queueRight.isEmpty())
+            break;
+
+          if (Thread.interrupted())
+            throw new OCommandExecutionException("The shortestPath() function has been interrupted");
+
+          if (!OCommandExecutorAbstract.checkInterruption(iContext))
+            break;
+
+          List<ORID> neighborIdentity;
+
+          if (ctx.queueLeft.size() <= ctx.queueRight.size()) {
+            // START EVALUATING FROM LEFT
+            neighborIdentity = walkLeft(ctx);
+            if (neighborIdentity != null)
+              return neighborIdentity;
+            depth++;
+            if (ctx.maxDepth != null && ctx.maxDepth <= depth) {
+              break;
+            }
+
+            if (ctx.queueLeft.isEmpty())
+              break;
+
+            neighborIdentity = walkRight(ctx);
+            if (neighborIdentity != null)
+              return neighborIdentity;
+
           } else {
-            neighbors = current.getVertices(direction, edgeTypeParam);
-          }
-          for (Vertex neighbor : neighbors) {
-            final OrientVertex v = (OrientVertex) neighbor;
-            final ORID neighborIdentity = v.getIdentity();
 
-            if (rightVisited.contains(neighborIdentity)) {
-              previouses.put(neighborIdentity, current.getIdentity());
-              return computePath(previouses, nexts, neighborIdentity);
-            }
-            if (!leftVisited.contains(neighborIdentity)) {
-              previouses.put(neighborIdentity, current.getIdentity());
+            // START EVALUATING FROM RIGHT
+            neighborIdentity = walkRight(ctx);
+            if (neighborIdentity != null)
+              return neighborIdentity;
 
-              nextLevelQueue.offer(v);
-              leftVisited.add(neighborIdentity);
+            depth++;
+            if (ctx.maxDepth != null && ctx.maxDepth <= depth) {
+              break;
             }
 
+            if (ctx.queueRight.isEmpty())
+              break;
+
+            neighborIdentity = walkLeft(ctx);
+            if (neighborIdentity != null)
+              return neighborIdentity;
           }
+
+          depth++;
         }
-        queue1 = nextLevelQueue;
-        nextLevelQueue = new ArrayDeque<OrientVertex>();
-
-        while (!queue2.isEmpty()) {
-          reverseCurrent = queue2.poll();
-
-          Iterable<Vertex> neighbors;
-          if (edgeType == null) {
-            neighbors = reverseCurrent.getVertices(reverseDirection);
-          } else {
-            neighbors = reverseCurrent.getVertices(reverseDirection, edgeTypeParam);
-          }
-          for (Vertex neighbor : neighbors) {
-            final OrientVertex v = (OrientVertex) neighbor;
-            final ORID neighborIdentity = v.getIdentity();
-
-            if (leftVisited.contains(neighborIdentity)) {
-              nexts.put(neighborIdentity, reverseCurrent.getIdentity());
-              return computePath(previouses, nexts, neighborIdentity);
-            }
-            if (!rightVisited.contains(neighborIdentity)) {
-
-              nexts.put(neighborIdentity, reverseCurrent.getIdentity());
-
-              nextLevelQueue.offer(v);
-              rightVisited.add(neighborIdentity);
-            }
-
-          }
-        }
-        queue2 = nextLevelQueue;
+        return new ArrayList<ORID>();
       }
-      return new ArrayList<ORID>();
-    } finally {
-      if (shutdownFlag.getValue())
-        graph.shutdown(false);
-      ODatabaseRecordThreadLocal.INSTANCE.set(curDb);
+    });
+  }
+
+  private void bindAdditionalParams(Object additionalParams, OShortestPathContext ctx) {
+    if (additionalParams == null) {
+      return;
     }
+    Map<String, Object> mapParams = null;
+    if (additionalParams instanceof Map) {
+      mapParams = (Map) additionalParams;
+    } else if (additionalParams instanceof OIdentifiable) {
+      mapParams = ((ODocument) ((OIdentifiable) additionalParams).getRecord()).toMap();
+    }
+    if (mapParams != null) {
+      ctx.maxDepth = integer(mapParams.get("maxDepth"));
+    }
+  }
+
+  private Integer integer(Object fromObject) {
+    if (fromObject == null) {
+      return null;
+    }
+    if (fromObject instanceof Number) {
+      return ((Number) fromObject).intValue();
+    }
+    if (fromObject instanceof String) {
+      try {
+        return Integer.parseInt((String) fromObject);
+      } catch (Exception e) {
+      }
+    }
+    return null;
   }
 
   public String getSyntax() {
     return "shortestPath(<sourceVertex>, <destinationVertex>, [<direction>, [ <edgeTypeAsString> ]])";
+  }
+
+  protected List<ORID> walkLeft(final OSQLFunctionShortestPath.OShortestPathContext ctx) {
+    ArrayDeque<OrientVertex> nextLevelQueue = new ArrayDeque<OrientVertex>();
+    while (!ctx.queueLeft.isEmpty()) {
+      ctx.current = ctx.queueLeft.poll();
+
+      Iterable<Vertex> neighbors;
+      if (ctx.edgeType == null) {
+        neighbors = ctx.current.getVertices(ctx.directionLeft);
+      } else {
+        neighbors = ctx.current.getVertices(ctx.directionLeft, ctx.edgeTypeParam);
+      }
+      for (Vertex neighbor : neighbors) {
+        final OrientVertex v = (OrientVertex) neighbor;
+        final ORID neighborIdentity = v.getIdentity();
+
+        if (ctx.rightVisited.contains(neighborIdentity)) {
+          ctx.previouses.put(neighborIdentity, ctx.current.getIdentity());
+          return computePath(ctx.previouses, ctx.nexts, neighborIdentity);
+        }
+        if (!ctx.leftVisited.contains(neighborIdentity)) {
+          ctx.previouses.put(neighborIdentity, ctx.current.getIdentity());
+
+          nextLevelQueue.offer(v);
+          ctx.leftVisited.add(neighborIdentity);
+        }
+
+      }
+    }
+    ctx.queueLeft = nextLevelQueue;
+    return null;
+  }
+
+  protected List<ORID> walkRight(final OSQLFunctionShortestPath.OShortestPathContext ctx) {
+    final ArrayDeque<OrientVertex> nextLevelQueue = new ArrayDeque<OrientVertex>();
+
+    while (!ctx.queueRight.isEmpty()) {
+      ctx.currentRight = ctx.queueRight.poll();
+
+      Iterable<Vertex> neighbors;
+      if (ctx.edgeType == null) {
+        neighbors = ctx.currentRight.getVertices(ctx.directionRight);
+      } else {
+        neighbors = ctx.currentRight.getVertices(ctx.directionRight, ctx.edgeTypeParam);
+      }
+      for (Vertex neighbor : neighbors) {
+        final OrientVertex v = (OrientVertex) neighbor;
+        final ORID neighborIdentity = v.getIdentity();
+
+        if (ctx.leftVisited.contains(neighborIdentity)) {
+          ctx.nexts.put(neighborIdentity, ctx.currentRight.getIdentity());
+          return computePath(ctx.previouses, ctx.nexts, neighborIdentity);
+        }
+        if (!ctx.rightVisited.contains(neighborIdentity)) {
+
+          ctx.nexts.put(neighborIdentity, ctx.currentRight.getIdentity());
+
+          nextLevelQueue.offer(v);
+          ctx.rightVisited.add(neighborIdentity);
+        }
+
+      }
+    }
+    ctx.queueRight = nextLevelQueue;
+    return null;
   }
 
   private List<ORID> computePath(final Map<ORID, ORID> leftDistances, final Map<ORID, ORID> rightDistances, final ORID neighbor) {

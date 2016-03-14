@@ -75,7 +75,7 @@ public class OCompletedTxTask extends OAbstractReplicatedTask {
 
   @Override
   public OCommandDistributedReplicateRequest.QUORUM_TYPE getQuorumType() {
-    return OCommandDistributedReplicateRequest.QUORUM_TYPE.ALL;
+    return OCommandDistributedReplicateRequest.QUORUM_TYPE.NONE;
   }
 
   @Override
@@ -110,9 +110,9 @@ public class OCompletedTxTask extends OAbstractReplicatedTask {
    * @return
    */
   @Override
-  public long getTimeout() {
+  public long getDistributedTimeout() {
     final long to = OGlobalConfiguration.DISTRIBUTED_CRUD_TASK_SYNCH_TIMEOUT.getValueAsLong();
-    return to + ((to / 2) * locks.size());
+    return to + (100 * locks.size());
   }
 
   @Override

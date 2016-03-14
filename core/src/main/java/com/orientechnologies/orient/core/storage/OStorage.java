@@ -19,8 +19,8 @@
  */
 package com.orientechnologies.orient.core.storage;
 
+import com.orientechnologies.common.concur.lock.OModificationLock;
 import com.orientechnologies.common.concur.resource.OSharedContainer;
-import com.orientechnologies.common.concur.resource.OSharedResourceAdaptiveExternal;
 import com.orientechnologies.orient.core.command.OCommandRequestText;
 import com.orientechnologies.orient.core.config.OStorageConfiguration;
 import com.orientechnologies.orient.core.conflict.ORecordConflictStrategy;
@@ -82,8 +82,6 @@ public interface OStorage extends OBackupable, OSharedContainer {
   void close(boolean iForce, boolean onDelete);
 
   boolean isClosed();
-
-  OSharedResourceAdaptiveExternal getLock();
 
   // CRUD OPERATIONS
   OStorageOperationResult<OPhysicalPosition> createRecord(ORecordId iRecordId, byte[] iContent, ORecordVersion iRecordVersion,
@@ -191,11 +189,6 @@ public interface OStorage extends OBackupable, OSharedContainer {
 
   void synch();
 
-  int getUsers();
-
-  int addUser();
-
-  int removeUser();
 
   /**
    * Execute the command request and return the result back.
@@ -239,6 +232,8 @@ public interface OStorage extends OBackupable, OSharedContainer {
 
   OStorage getUnderlying();
 
+  boolean isRemote();
+
   boolean isDistributed();
 
   boolean isAssigningClusterIds();
@@ -256,4 +251,11 @@ public interface OStorage extends OBackupable, OSharedContainer {
   ORecordConflictStrategy getConflictStrategy();
 
   void setConflictStrategy(ORecordConflictStrategy iResolver);
+
+  /**
+   * Internal API.
+   *
+   * @return Modification lock is used to stop all data modification operations to put database at "safepoint like" state.
+   */
+  OModificationLock getModificationLock();
 }

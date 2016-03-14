@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import com.orientechnologies.common.concur.ONeedRetryException;
@@ -61,6 +62,7 @@ public class OTxTask extends OAbstractReplicatedTask {
 
   private List<OAbstractRecordReplicatedTask> tasks            = new ArrayList<OAbstractRecordReplicatedTask>();
   private transient OTxTaskResult             result;
+  private transient boolean                   lockRecord       = true;
 
   public OTxTask() {
   }
@@ -91,14 +93,14 @@ public class OTxTask extends OAbstractReplicatedTask {
         for (OAbstractRecordReplicatedTask task : tasks) {
           if (task instanceof OCreateRecordTask) {
             final OCreateRecordTask createRT = (OCreateRecordTask) task;
-            final int clId = createRT.clusterId > -1 ? createRT.clusterId : createRT.getRid().isValid() ? createRT.getRid()
-                .getClusterId() : -1;
+            final int clId = createRT.clusterId > -1 ? createRT.clusterId
+                : createRT.getRid().isValid() ? createRT.getRid().getClusterId() : -1;
             final String clusterName = clId > -1 ? database.getClusterNameById(clId) : null;
             tx.addRecord(createRT.getRecord(), ORecordOperation.CREATED, clusterName);
           } else {
             // UPDATE & DELETE: TRY EARLY LOCKING RECORD
             final ORID rid = task.getRid();
-            if (!ddb.lockRecord(rid, nodeSource))
+            if (lockRecord && !ddb.lockRecord(rid, nodeSource))
               throw new ODistributedRecordLockedException(rid);
 
             result.locks.add(rid);
@@ -108,7 +110,7 @@ public class OTxTask extends OAbstractReplicatedTask {
         for (OAbstractRecordReplicatedTask task : tasks) {
           final ORecord record = task.getRecord();
 
-          if (record != null) {
+          if (record instanceof ODocument) {
             // ASSURE ALL RIDBAGS ARE UNMARSHALLED TO AVOID STORING TEMP RIDS
             for (String f : ((ODocument) record).fieldNames()) {
               final Object fValue = ((ODocument) record).field(f);
@@ -146,9 +148,18 @@ public class OTxTask extends OAbstractReplicatedTask {
           }
         }
       } catch (Exception t) {
+        // RESET ANY ASSIGNED CLUSTER ID
+        for (OAbstractRecordReplicatedTask task : tasks) {
+          if (task instanceof OCreateRecordTask) {
+            final OCreateRecordTask createRT = (OCreateRecordTask) task;
+            createRT.resetRecord();
+          }
+        }
+
         // EXCEPTION: ASSURE ALL LOCKS ARE FREED
         for (ORID r : result.locks)
           ddb.unlockRecord(r);
+
         // RETHROW IT
         throw t;
       }
@@ -182,26 +193,27 @@ public class OTxTask extends OAbstractReplicatedTask {
   @Override
   public OFixTxTask getFixTask(final ODistributedRequest iRequest, OAbstractRemoteTask iOriginalTask, final Object iBadResponse,
       final Object iGoodResponse) {
-    if (!(iBadResponse instanceof List)) {
+    if (!(iBadResponse instanceof OTxTaskResult)) {
       // TODO: MANAGE ERROR ON LOCAL NODE
       ODistributedServerLog.debug(this, getNodeSource(), null, DIRECTION.NONE,
           "error on creating fix-task for request: '%s' because bad response is not expected type: %s", iRequest, iBadResponse);
       return null;
     }
 
-    if (!(iGoodResponse instanceof List)) {
+    if (!(iGoodResponse instanceof OTxTaskResult)) {
       // TODO: MANAGE ERROR ON LOCAL NODE
       ODistributedServerLog.debug(this, getNodeSource(), null, DIRECTION.NONE,
           "error on creating fix-task for request: '%s' because good response is not expected type: %s", iRequest, iBadResponse);
       return null;
     }
 
-    final OFixTxTask fixTask = new OFixTxTask(result.locks);
+    final OFixTxTask fixTask = new OFixTxTask(((OTxTaskResult) iBadResponse).locks);
 
     for (int i = 0; i < tasks.size(); ++i) {
       final OAbstractRecordReplicatedTask t = tasks.get(i);
-      final OAbstractRemoteTask task = t.getFixTask(iRequest, t, ((List<Object>) iBadResponse).get(i),
-          ((List<Object>) iGoodResponse).get(i));
+
+      final OAbstractRemoteTask task = t.getFixTask(iRequest, t, ((OTxTaskResult) iBadResponse).results.get(i),
+          ((OTxTaskResult) iGoodResponse).results.get(i));
 
       if (task != null)
         fixTask.add(task);
@@ -215,22 +227,34 @@ public class OTxTask extends OAbstractReplicatedTask {
       // NO RESULT: NO UNDO NEEDED
       return null;
 
-    final OFixTxTask fixTask = new OFixTxTask(result.locks);
+    return getUndoTaskForLocalStorage(iBadResponse);
+  }
+
+  public OAbstractRemoteTask getUndoTaskForLocalStorage(final Object iBadResponse) {
+    final OFixTxTask fixTask = new OFixTxTask(result != null ? result.locks : new HashSet<ORID>());
 
     for (int i = 0; i < tasks.size(); ++i) {
       final OAbstractRecordReplicatedTask t = tasks.get(i);
 
       final OAbstractRemoteTask undoTask;
       if (iBadResponse instanceof List)
-        undoTask = t.getUndoTask(iRequest, ((List<Object>) iBadResponse).get(i));
+        undoTask = t.getUndoTask(null, ((List<Object>) iBadResponse).get(i));
       else
-        undoTask = t.getUndoTask(iRequest, iBadResponse);
+        undoTask = t.getUndoTask(null, iBadResponse);
 
       if (undoTask != null)
         fixTask.add(undoTask);
     }
 
     return fixTask;
+  }
+
+  public boolean isLockRecord() {
+    return lockRecord;
+  }
+
+  public void setLockRecord(final boolean lockRecord) {
+    this.lockRecord = lockRecord;
   }
 
   @Override
@@ -253,7 +277,7 @@ public class OTxTask extends OAbstractReplicatedTask {
    * @return
    */
   @Override
-  public long getTimeout() {
+  public long getDistributedTimeout() {
     final long to = OGlobalConfiguration.DISTRIBUTED_CRUD_TASK_SYNCH_TIMEOUT.getValueAsLong();
     return to + ((to / 2) * tasks.size());
   }

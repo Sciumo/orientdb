@@ -15,8 +15,6 @@
  */
 package com.orientechnologies.orient.core.storage.impl.local.paginated;
 
-import java.io.IOException;
-
 import com.orientechnologies.common.concur.lock.OModificationLock;
 import com.orientechnologies.common.util.OCommonConst;
 import com.orientechnologies.orient.core.config.OStorageClusterConfiguration;
@@ -30,6 +28,8 @@ import com.orientechnologies.orient.core.storage.ORawBuffer;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 import com.orientechnologies.orient.core.version.ORecordVersion;
+
+import java.io.IOException;
 
 /**
  * Represents an offline cluster, created with the "alter cluster X status offline" command. To restore the original cluster assure
@@ -100,8 +100,8 @@ public class OOfflineCluster implements OCluster {
         return storageLocal.setClusterStatus(id, OStorageClusterConfiguration.STATUS.valueOf(stringValue.toUpperCase()));
       }
       default:
-        throw new IllegalArgumentException("Runtime change of attribute '" + attribute + " is not supported on Offline cluster "
-            + getName());
+        throw new IllegalArgumentException(
+            "Runtime change of attribute '" + attribute + " is not supported on Offline cluster " + getName());
       }
 
     } finally {
@@ -146,13 +146,15 @@ public class OOfflineCluster implements OCluster {
 
   @Override
   public ORawBuffer readRecord(long clusterPosition) throws IOException {
-    throw new OOfflineClusterException("Cannot read a record from the offline cluster '" + name + "'");
+    throw new ORecordNotFoundException("Record with rid #" + id + ":" + clusterPosition + " was not found in database",
+        new OOfflineClusterException("Cannot read a record from the offline cluster '" + name + "'"));
   }
 
   @Override
-  public ORawBuffer readRecordIfVersionIsNotLatest(long clusterPosition, ORecordVersion recordVersion) throws IOException,
-      ORecordNotFoundException {
-    throw new OOfflineClusterException("Cannot read a record from the offline cluster '" + name + "'");
+  public ORawBuffer readRecordIfVersionIsNotLatest(long clusterPosition, ORecordVersion recordVersion)
+      throws IOException, ORecordNotFoundException {
+    throw new ORecordNotFoundException("Record with rid #" + id + ":" + clusterPosition + " was not found in database",
+        new OOfflineClusterException("Cannot read a record from the offline cluster '" + name + "'"));
   }
 
   @Override
@@ -181,6 +183,11 @@ public class OOfflineCluster implements OCluster {
   }
 
   @Override
+  public String getFileName() {
+    throw new OOfflineClusterException("Cannot return filename of offline cluster '" + name + "'");
+  }
+
+  @Override
   public int getId() {
     return id;
   }
@@ -188,16 +195,6 @@ public class OOfflineCluster implements OCluster {
   @Override
   public void synch() throws IOException {
 
-  }
-
-  @Override
-  public void setSoftlyClosed(boolean softlyClosed) throws IOException {
-
-  }
-
-  @Override
-  public boolean wasSoftlyClosed() throws IOException {
-    return false;
   }
 
   @Override
@@ -232,6 +229,11 @@ public class OOfflineCluster implements OCluster {
 
   @Override
   public boolean isHashBased() {
+    return false;
+  }
+
+  @Override
+  public boolean isSystemCluster() {
     return false;
   }
 

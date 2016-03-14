@@ -19,14 +19,14 @@
  */
 package com.orientechnologies.orient.enterprise.channel.binary;
 
+import java.io.IOException;
+
 import com.orientechnologies.orient.core.Orient;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.record.ORecord;
 import com.orientechnologies.orient.core.record.ORecordInternal;
 import com.orientechnologies.orient.core.version.ORecordVersion;
-
-import java.io.IOException;
 
 /**
  * The range of the requests is 1-79.
@@ -131,9 +131,12 @@ public class OChannelBinaryProtocol {
   public static final int   PROTOCOL_VERSION_29                       = 29;                 // ADDED PUSH SUPPORT FOR LIVE QUERY
   public static final int   PROTOCOL_VERSION_30                       = 30;                 // NEW COMMAND TO READ RECORD ONLY IF
                                                                                              // VERSION IS NOT LATEST WAS ADD
-  public static final int   PROTOCOL_VERSION_31                       = 30;                 // NEW INDEX COMMANDS: INDEX_GET,
+  public static final int   PROTOCOL_VERSION_31                       = 31;                 // NEW INDEX COMMANDS: INDEX_GET,
                                                                                              // INDEX_PUT, INDEX_REMOVE
-  public static final int   CURRENT_PROTOCOL_VERSION                  = PROTOCOL_VERSION_31;
+
+  public static final int   PROTOCOL_VERSION_32                       = 32;                 // STREAMABLE RESULT SET
+
+  public static final int   CURRENT_PROTOCOL_VERSION                  = PROTOCOL_VERSION_32;
 
   public static OIdentifiable readIdentifiable(final OChannelBinaryAsynchClient network) throws IOException {
     final int classId = network.readShort();

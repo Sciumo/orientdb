@@ -19,8 +19,6 @@
  */
 package com.orientechnologies.orient.client.remote;
 
-import java.io.IOException;
-
 import com.orientechnologies.common.concur.lock.OModificationLock;
 import com.orientechnologies.orient.core.config.OStorageClusterConfiguration;
 import com.orientechnologies.orient.core.conflict.ORecordConflictStrategy;
@@ -31,6 +29,8 @@ import com.orientechnologies.orient.core.storage.OPhysicalPosition;
 import com.orientechnologies.orient.core.storage.ORawBuffer;
 import com.orientechnologies.orient.core.storage.OStorage;
 import com.orientechnologies.orient.core.version.ORecordVersion;
+
+import java.io.IOException;
 
 /**
  * Remote cluster implementation
@@ -164,19 +164,16 @@ public class OClusterRemote implements OCluster {
     return 0;
   }
 
+  @Override
+  public String getFileName() {
+    throw new UnsupportedOperationException("getFileName()");
+  }
+
   public int getId() {
     return id;
   }
 
   public void synch() throws IOException {
-  }
-
-  public void setSoftlyClosed(boolean softlyClosed) throws IOException {
-  }
-
-  @Override
-  public boolean wasSoftlyClosed() throws IOException {
-    return true;
   }
 
   public String getName() {
@@ -188,6 +185,11 @@ public class OClusterRemote implements OCluster {
   }
 
   public boolean isHashBased() {
+    return false;
+  }
+
+  @Override
+  public boolean isSystemCluster() {
     return false;
   }
 

@@ -161,6 +161,11 @@ public interface OIndex<T> extends Comparable<OIndex<T>> {
   String getType();
 
   /**
+   * Returns the engine of the index as string.
+   */
+  public String getAlgorithm();
+
+  /**
    * Tells if the index is automatic. Automatic means it's maintained automatically by OrientDB. This is the case of indexes created
    * against schema properties. Automatic indexes can always been rebuilt.
    * 
@@ -256,13 +261,6 @@ public interface OIndex<T> extends Comparable<OIndex<T>> {
    * @return cursor which presents subset of data which associated with key which is less than passed in key.
    */
   public OIndexCursor iterateEntriesMinor(Object toKey, boolean toInclusive, boolean ascOrder);
-
-  /**
-   * Returns the Record Identity of the index if persistent.
-   * 
-   * @return Valid ORID if it's persistent, otherwise ORID(-1:-1)
-   */
-  public ORID getIdentity();
 
   public OIndexCursor cursor();
 

@@ -94,11 +94,11 @@ public abstract class OSQLFunctionAbstract implements OSQLFunction {
 
   @Override
   public Object mergeDistributedResult(List<Object> resultsToMerge) {
-    throw new IllegalStateException("By default SQL function execution result can not be merged");
+    throw new IllegalStateException("By default SQL function execution result cannot be merged");
   }
 
   protected boolean returnDistributedResult() {
-    return OScenarioThreadLocal.INSTANCE.get() == OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED;
+    return OScenarioThreadLocal.INSTANCE.getRunMode() == OScenarioThreadLocal.RUN_MODE.RUNNING_DISTRIBUTED;
   }
 
   protected String getDistributedStorageId() {

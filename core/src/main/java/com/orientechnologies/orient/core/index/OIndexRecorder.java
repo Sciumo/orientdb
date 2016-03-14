@@ -234,11 +234,6 @@ public class OIndexRecorder implements OIndex<OIdentifiable>, OIndexInternal<OId
   }
 
   @Override
-  public ORID getIdentity() {
-    return delegate.getIdentity();
-  }
-
-  @Override
   public OIndexCursor cursor() {
     throw new UnsupportedOperationException("Not allowed operation");
   }
@@ -316,16 +311,6 @@ public class OIndexRecorder implements OIndex<OIdentifiable>, OIndexInternal<OId
   @Override
   public boolean hasRangeQuerySupport() {
     return delegate.hasRangeQuerySupport();
-  }
-
-  @Override
-  public void freeze(boolean throwException) {
-    throw new UnsupportedOperationException("Not allowed operation");
-  }
-
-  @Override
-  public void release() {
-    throw new UnsupportedOperationException("Not allowed operation");
   }
 
   @Override

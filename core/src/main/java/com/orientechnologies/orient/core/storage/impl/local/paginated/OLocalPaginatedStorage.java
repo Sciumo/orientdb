@@ -33,10 +33,9 @@ import com.orientechnologies.orient.core.engine.local.OEngineLocalPaginated;
 import com.orientechnologies.orient.core.exception.OStorageException;
 import com.orientechnologies.orient.core.index.engine.OHashTableIndexEngine;
 import com.orientechnologies.orient.core.index.engine.OSBTreeIndexEngine;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OReadCache;
-import com.orientechnologies.orient.core.index.hashindex.local.cache.OWOWCache;
 import com.orientechnologies.orient.core.metadata.OMetadataDefault;
-import com.orientechnologies.orient.core.storage.OIdentifiableStorage;
+import com.orientechnologies.orient.core.storage.cache.OReadCache;
+import com.orientechnologies.orient.core.storage.cache.local.OWOWCache;
 import com.orientechnologies.orient.core.storage.impl.local.OAbstractPaginatedStorage;
 import com.orientechnologies.orient.core.storage.impl.local.OFreezableStorage;
 import com.orientechnologies.orient.core.storage.impl.local.OStorageConfigurationSegment;
@@ -44,12 +43,9 @@ import com.orientechnologies.orient.core.storage.impl.local.OStorageVariablePars
 import com.orientechnologies.orient.core.storage.impl.local.paginated.wal.ODiskWriteAheadLog;
 import com.orientechnologies.orient.core.util.OBackupable;
 
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.Map;
+import java.io.*;
+import java.lang.String;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -61,24 +57,24 @@ import java.util.concurrent.TimeUnit;
  * @since 28.03.13
  */
 public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements OFreezableStorage, OBackupable {
-  private static String[]                  ALL_FILE_EXTENSIONS = { ".ocf", ".pls", ".pcl", ".oda", ".odh", ".otx", ".ocs", ".oef",
-      ".oem", ".oet", ODiskWriteAheadLog.WAL_SEGMENT_EXTENSION, ODiskWriteAheadLog.MASTER_RECORD_EXTENSION,
+  private static String[] ALL_FILE_EXTENSIONS = { ".ocf", ".pls", ".pcl", ".oda", ".odh", ".otx", ".ocs", ".oef", ".oem", ".oet",
+      ODiskWriteAheadLog.WAL_SEGMENT_EXTENSION, ODiskWriteAheadLog.MASTER_RECORD_EXTENSION,
       OHashTableIndexEngine.BUCKET_FILE_EXTENSION, OHashTableIndexEngine.METADATA_FILE_EXTENSION,
       OHashTableIndexEngine.TREE_FILE_EXTENSION, OHashTableIndexEngine.NULL_BUCKET_FILE_EXTENSION,
       OClusterPositionMap.DEF_EXTENSION, OSBTreeIndexEngine.DATA_FILE_EXTENSION, OWOWCache.NAME_ID_MAP_EXTENSION,
       OIndexRIDContainer.INDEX_FILE_EXTENSION, OSBTreeCollectionManagerShared.DEFAULT_EXTENSION,
-      OSBTreeIndexEngine.NULL_BUCKET_FILE_EXTENSION           };
+      OSBTreeIndexEngine.NULL_BUCKET_FILE_EXTENSION };
 
-  private static final int                 ONE_KB              = 1024;
+  private static final int ONE_KB = 1024;
 
-  private final int                        DELETE_MAX_RETRIES;
-  private final int                        DELETE_WAIT_TIME;
+  private final int DELETE_MAX_RETRIES;
+  private final int DELETE_WAIT_TIME;
 
   private final OStorageVariableParser     variableParser;
   private final OPaginatedStorageDirtyFlag dirtyFlag;
 
-  private String                           storagePath;
-  private ExecutorService                  checkpointExecutor;
+  private final String    storagePath;
+  private ExecutorService checkpointExecutor;
 
   public OLocalPaginatedStorage(final String name, final String filePath, final String mode, final int id, OReadCache readCache)
       throws IOException {
@@ -88,15 +84,16 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
 
     File f = new File(url);
 
+    String sp;
     if (f.exists() || !exists(f.getParent())) {
       // ALREADY EXISTS OR NOT LEGACY
-      storagePath = OSystemVariableResolver.resolveSystemVariables(OFileUtils.getPath(new File(url).getPath()));
+      sp = OSystemVariableResolver.resolveSystemVariables(OFileUtils.getPath(new File(url).getPath()));
     } else {
       // LEGACY DB
-      storagePath = OSystemVariableResolver.resolveSystemVariables(OFileUtils.getPath(new File(url).getParent()));
+      sp = OSystemVariableResolver.resolveSystemVariables(OFileUtils.getPath(new File(url).getParent()));
     }
 
-    storagePath = OIOUtils.getPathFromDatabaseName(storagePath);
+    storagePath = OIOUtils.getPathFromDatabaseName(sp);
     variableParser = new OStorageVariableParser(storagePath);
 
     configuration = new OStorageConfigurationSegment(this);
@@ -117,6 +114,9 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
   }
 
   public boolean exists() {
+    if (status == STATUS.OPEN)
+      return true;
+
     return exists(storagePath);
   }
 
@@ -139,8 +139,11 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
   }
 
   @Override
-  public void backup(OutputStream out, Map<String, Object> options, final Callable<Object> callable,
+  public List<String> backup(OutputStream out, Map<String, Object> options, final Callable<Object> callable,
       final OCommandOutputListener iOutput, final int compressionLevel, final int bufferSize) throws IOException {
+    if (out == null)
+      throw new IllegalArgumentException("Backup output is null");
+
     freeze(false);
     try {
       if (callable != null)
@@ -152,8 +155,8 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
 
       final OutputStream bo = bufferSize > 0 ? new BufferedOutputStream(out, bufferSize) : out;
       try {
-        OZIPCompressionUtil.compressDirectory(new File(getStoragePath()).getAbsolutePath(), bo, new String[] { ".wal" }, iOutput,
-            compressionLevel);
+        return OZIPCompressionUtil.compressDirectory(new File(getStoragePath()).getAbsolutePath(), bo, new String[] { ".wal" },
+            iOutput, compressionLevel);
       } finally {
         if (bufferSize > 0) {
           bo.flush();
@@ -211,11 +214,17 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
   @Override
   protected void preCloseSteps() throws IOException {
     try {
+      ((OWOWCache) writeCache).unregisterMBean();
+    } catch (Exception e) {
+      OLogManager.instance().error(this, "MBean for write cache cannot unregistered", e);
+    }
+
+    try {
       if (writeAheadLog != null) {
         checkpointExecutor.shutdown();
         if (!checkpointExecutor.awaitTermination(OGlobalConfiguration.WAL_FULL_CHECKPOINT_SHUTDOWN_TIMEOUT.getValueAsInteger(),
             TimeUnit.SECONDS))
-          throw new OStorageException("Can not terminate full checkpoint task");
+          throw new OStorageException("Cannot terminate full checkpoint task");
       }
     } catch (InterruptedException e) {
       Thread.interrupted();
@@ -255,12 +264,9 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
       } else
         return;
 
-      OLogManager
-          .instance()
-          .debug(
-              this,
-              "Cannot delete database files because they are still locked by the OrientDB process: waiting %d ms and retrying %d/%d...",
-              DELETE_WAIT_TIME, i, DELETE_MAX_RETRIES);
+      OLogManager.instance().debug(this,
+          "Cannot delete database files because they are still locked by the OrientDB process: waiting %d ms and retrying %d/%d...",
+          DELETE_WAIT_TIME, i, DELETE_MAX_RETRIES);
     }
 
     throw new OStorageException("Cannot delete database '" + name + "' located in: " + dbDir + ". Database files seem locked");
@@ -289,15 +295,21 @@ public class OLocalPaginatedStorage extends OAbstractPaginatedStorage implements
       writeAheadLog = null;
 
     long diskCacheSize = OGlobalConfiguration.DISK_CACHE_SIZE.getValueAsLong() * 1024 * 1024;
-    long writeCacheSize = (long) Math.floor((((double) OGlobalConfiguration.DISK_WRITE_CACHE_PART.getValueAsInteger()) / 100.0)
-        * diskCacheSize);
+    long writeCacheSize = (long) Math
+        .floor((((double) OGlobalConfiguration.DISK_WRITE_CACHE_PART.getValueAsInteger()) / 100.0) * diskCacheSize);
 
-    writeCache = new OWOWCache(false, OGlobalConfiguration.DISK_CACHE_PAGE_SIZE.getValueAsInteger() * ONE_KB,
+    final OWOWCache wowCache = new OWOWCache(false, OGlobalConfiguration.DISK_CACHE_PAGE_SIZE.getValueAsInteger() * ONE_KB,
         OGlobalConfiguration.DISK_WRITE_CACHE_PAGE_TTL.getValueAsLong() * 1000, writeAheadLog,
         OGlobalConfiguration.DISK_WRITE_CACHE_PAGE_FLUSH_INTERVAL.getValueAsInteger(), writeCacheSize, diskCacheSize, this, true,
         getId());
-    writeCache.addLowDiskSpaceListener(this);
+    wowCache.addLowDiskSpaceListener(this);
+    try {
+      wowCache.registerMBean();
+    } catch (Exception e) {
+      OLogManager.instance().error(this, "MBean for write cache cannot be registered.");
+    }
 
+    writeCache = wowCache;
   }
 
   public static boolean exists(final String path) {

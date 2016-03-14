@@ -41,7 +41,7 @@ import com.orientechnologies.common.listener.OListenerManger;
 import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.common.parser.OSystemVariableResolver;
 import com.orientechnologies.common.profiler.OProfiler;
-import com.orientechnologies.common.profiler.OProfilerMBean;
+import com.orientechnologies.common.profiler.OProfilerStub;
 import com.orientechnologies.orient.core.command.script.OScriptManager;
 import com.orientechnologies.orient.core.config.OGlobalConfiguration;
 import com.orientechnologies.orient.core.conflict.ORecordConflictStrategyFactory;
@@ -82,6 +82,7 @@ public class Orient extends OListenerManger<OOrientListener> {
                                                                                                                        .newSetFromMap(new ConcurrentHashMap<WeakHashSetValueHolder<OOrientStartupListener>, Boolean>());
   private final Set<WeakHashSetValueHolder<OOrientShutdownListener>>                 weakShutdownListeners         = Collections
                                                                                                                        .newSetFromMap(new ConcurrentHashMap<WeakHashSetValueHolder<OOrientShutdownListener>, Boolean>());
+
   static {
     instance.startup();
   }
@@ -90,7 +91,7 @@ public class Orient extends OListenerManger<OOrientListener> {
   private volatile Timer                                                             timer;
   private volatile ORecordFactoryManager                                             recordFactoryManager          = new ORecordFactoryManager();
   private OrientShutdownHook                                                         shutdownHook;
-  private volatile OProfilerMBean                                                    profiler;
+  private volatile OProfiler                                                         profiler;
   private ODatabaseThreadLocalFactory                                                databaseThreadFactory;
   private volatile boolean                                                           active                        = false;
   private ThreadPoolExecutor                                                         workers;
@@ -195,7 +196,7 @@ public class Orient extends OListenerManger<OOrientListener> {
       if (timer == null)
         timer = new Timer(true);
 
-      profiler = new OProfiler();
+      profiler = new OProfilerStub();
 
       shutdownHook = new OrientShutdownHook();
       if (signalHandler == null) {
@@ -272,6 +273,10 @@ public class Orient extends OListenerManger<OOrientListener> {
 
       OLogManager.instance().debug(this, "Orient Engine is shutting down...");
 
+      if (databaseFactory != null)
+        // CLOSE ALL DATABASES
+        databaseFactory.shutdown();
+
       closeAllStorages();
 
       // SHUTDOWN ENGINES
@@ -279,9 +284,9 @@ public class Orient extends OListenerManger<OOrientListener> {
         engine.shutdown();
       engines.clear();
 
-      if (databaseFactory != null)
-        // CLOSE ALL DATABASES
-        databaseFactory.shutdown();
+      if (threadGroup != null)
+        // STOP ALL THE PENDING THREADS
+        threadGroup.interrupt();
 
       if (shutdownHook != null) {
         shutdownHook.cancel();
@@ -291,10 +296,6 @@ public class Orient extends OListenerManger<OOrientListener> {
         signalHandler.cancel();
         signalHandler = null;
       }
-
-      if (threadGroup != null)
-        // STOP ALL THE PENDING THREADS
-        threadGroup.interrupt();
 
       timer.cancel();
       timer = null;
@@ -327,6 +328,8 @@ public class Orient extends OListenerManger<OOrientListener> {
 
       }
 
+      System.gc();
+
       OLogManager.instance().info(this, "OrientDB Engine shutdown complete");
       OLogManager.instance().flush();
     } finally {
@@ -336,23 +339,29 @@ public class Orient extends OListenerManger<OOrientListener> {
     return this;
   }
 
-  public void scheduleTask(TimerTask task, long delay, long period) {
+  public void scheduleTask(final TimerTask task, final long delay, final long period) {
     engineLock.readLock().lock();
     try {
-      if (active)
-        timer.schedule(task, delay, period);
-      else
+      if (active) {
+        if (period > 0)
+          timer.schedule(task, delay, period);
+        else
+          timer.schedule(task, delay);
+      } else
         OLogManager.instance().warn(this, "OrientDB engine is down. Task will not be scheduled.");
     } finally {
       engineLock.readLock().unlock();
     }
   }
 
-  public void scheduleTask(TimerTask task, Date firstTime, long period) {
+  public void scheduleTask(final TimerTask task, final Date firstTime, final long period) {
     engineLock.readLock().lock();
     try {
       if (active)
-        timer.schedule(task, firstTime, period);
+        if (period > 0)
+          timer.schedule(task, firstTime, period);
+        else
+          timer.schedule(task, firstTime);
       else
         OLogManager.instance().warn(this, "OrientDB engine is down. Task will not be scheduled.");
     } finally {
@@ -636,6 +645,9 @@ public class Orient extends OListenerManger<OOrientListener> {
       shutdownHook.cancel();
       shutdownHook = null;
     }
+  }
+
+  public void removeSignalHandler() {
     if (signalHandler != null) {
       signalHandler.cancel();
       signalHandler = null;
@@ -647,12 +659,15 @@ public class Orient extends OListenerManger<OOrientListener> {
   }
 
   public Iterator<ODatabaseLifecycleListener> getDbLifecycleListeners() {
-    return dbLifecycleListeners.keySet().iterator();
+    return new HashSet<ODatabaseLifecycleListener>(dbLifecycleListeners.keySet()).iterator();
   }
 
   public void addDbLifecycleListener(final ODatabaseLifecycleListener iListener) {
     final Map<ODatabaseLifecycleListener, ODatabaseLifecycleListener.PRIORITY> tmp = new LinkedHashMap<ODatabaseLifecycleListener, ODatabaseLifecycleListener.PRIORITY>(
         dbLifecycleListeners);
+    if (iListener.getPriority() == null)
+      throw new IllegalArgumentException("Priority of DatabaseLifecycleListener '" + iListener + "' cannot be null");
+
     tmp.put(iListener, iListener.getPriority());
     dbLifecycleListeners.clear();
     for (ODatabaseLifecycleListener.PRIORITY p : ODatabaseLifecycleListener.PRIORITY.values()) {
@@ -687,11 +702,11 @@ public class Orient extends OListenerManger<OOrientListener> {
     return databaseFactory;
   }
 
-  public OProfilerMBean getProfiler() {
+  public OProfiler getProfiler() {
     return profiler;
   }
 
-  public void setProfiler(final OProfilerMBean iProfiler) {
+  public void setProfiler(final OProfiler iProfiler) {
     profiler = iProfiler;
   }
 

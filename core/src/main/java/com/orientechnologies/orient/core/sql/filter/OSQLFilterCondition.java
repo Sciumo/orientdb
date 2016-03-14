@@ -26,6 +26,7 @@ import com.orientechnologies.orient.core.config.OStorageConfiguration;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.db.record.ORecordElement;
+import com.orientechnologies.orient.core.exception.OCommandExecutionException;
 import com.orientechnologies.orient.core.exception.OQueryParsingException;
 import com.orientechnologies.orient.core.exception.ORecordNotFoundException;
 import com.orientechnologies.orient.core.id.ORID;
@@ -36,6 +37,7 @@ import com.orientechnologies.orient.core.serialization.serializer.OStringSeriali
 import com.orientechnologies.orient.core.sql.OSQLHelper;
 import com.orientechnologies.orient.core.sql.functions.OSQLFunctionRuntime;
 import com.orientechnologies.orient.core.sql.operator.OQueryOperator;
+import com.orientechnologies.orient.core.sql.operator.OQueryOperatorMatches;
 import com.orientechnologies.orient.core.sql.query.OSQLQuery;
 
 import java.text.ParseException;
@@ -83,7 +85,8 @@ public class OSQLFilterCondition {
 
     Object r = evaluate(iCurrentRecord, iCurrentResult, right, iContext);
 
-    final OCollate collate = getCollate();
+    // no collate for regular expressions, otherwise quotes will result in no match
+    final OCollate collate = operator instanceof OQueryOperatorMatches ? null : getCollate();
 
     final Object[] convertedValues = checkForConversion(iCurrentRecord, l, r, collate);
     if (convertedValues != null) {
@@ -105,6 +108,8 @@ public class OSQLFilterCondition {
     Object result;
     try {
       result = operator.evaluateRecord(iCurrentRecord, iCurrentResult, this, l, r, iContext);
+    } catch (OCommandExecutionException e) {
+      throw e;
     } catch (Exception e) {
       result = Boolean.FALSE;
     }
@@ -285,35 +290,33 @@ public class OSQLFilterCondition {
         return new Date(new Double(stringValue).longValue());
       } catch (Exception pe2) {
         throw new OQueryParsingException("Error on conversion of date '" + stringValue + "' using the format: "
-            + formatter.toPattern());
+            + formatter.toPattern(), pe2);
       }
     }
   }
 
   protected Object evaluate(OIdentifiable iCurrentRecord, final ODocument iCurrentResult, final Object iValue,
       final OCommandContext iContext) {
-    if (iCurrentRecord != null && iCurrentRecord.getRecord().getInternalStatus() == ORecordElement.STATUS.NOT_LOADED) {
-      try {
-        iCurrentRecord = iCurrentRecord.getRecord().load();
-      } catch (ORecordNotFoundException e) {
-        return null;
+    if (iValue == null)
+      return null;
+
+    if (iCurrentRecord != null) {
+      iCurrentRecord = iCurrentRecord.getRecord();
+      if (iCurrentRecord != null && ((ODocument) iCurrentRecord).getInternalStatus() == ORecordElement.STATUS.NOT_LOADED) {
+        try {
+          iCurrentRecord = iCurrentRecord.getRecord().load();
+        } catch (ORecordNotFoundException e) {
+          return null;
+        }
       }
     }
 
     if (iValue instanceof OSQLFilterItem) {
-      if (iCurrentResult != null) {
-        final Object v = ((OSQLFilterItem) iValue).getValue(iCurrentResult, iCurrentResult, iContext);
-        if (v != null) {
-          return v;
-        }
-      }
-
       return ((OSQLFilterItem) iValue).getValue(iCurrentRecord, iCurrentResult, iContext);
     }
 
-    if (iValue instanceof OSQLFilterCondition)
-    // NESTED CONDITION: EVALUATE IT RECURSIVELY
-    {
+    if (iValue instanceof OSQLFilterCondition) {
+      // NESTED CONDITION: EVALUATE IT RECURSIVELY
       return ((OSQLFilterCondition) iValue).evaluate(iCurrentRecord, iCurrentResult, iContext);
     }
 
@@ -323,9 +326,9 @@ public class OSQLFilterCondition {
       return f.execute(iCurrentRecord, iCurrentRecord, iCurrentResult, iContext);
     }
 
-    final Iterable<?> multiValue = OMultiValue.getMultiValueIterable(iValue);
+    if (OMultiValue.isMultiValue(iValue)) {
+      final Iterable<?> multiValue = OMultiValue.getMultiValueIterable(iValue);
 
-    if (multiValue != null) {
       // MULTI VALUE: RETURN A COPY
       final ArrayList<Object> result = new ArrayList<Object>(OMultiValue.getSize(iValue));
 

@@ -19,8 +19,10 @@
  */
 package com.orientechnologies.orient.server.distributed.task;
 
+import com.orientechnologies.common.log.OLogManager;
 import com.orientechnologies.orient.core.command.OCommandDistributedReplicateRequest;
 import com.orientechnologies.orient.core.db.ODatabaseRecordThreadLocal;
+import com.orientechnologies.orient.core.db.OScenarioThreadLocal;
 import com.orientechnologies.orient.core.db.document.ODatabaseDocumentTx;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.server.OServer;
@@ -33,14 +35,15 @@ import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectOutput;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
 
 /**
  * Distributed create record task used for synchronization.
  *
  * @author Luca Garulli (l.garulli--at--orientechnologies.com)
- *
  */
 public class OFixTxTask extends OAbstractRemoteTask {
   private static final long         serialVersionUID = 1L;
@@ -63,25 +66,36 @@ public class OFixTxTask extends OAbstractRemoteTask {
   }
 
   @Override
-  public Object execute(final OServer iServer, ODistributedServerManager iManager, final ODatabaseDocumentTx database)
+  public Object execute(final OServer iServer, final ODistributedServerManager iManager, final ODatabaseDocumentTx database)
       throws Exception {
     ODistributedServerLog.debug(this, iManager.getLocalNodeName(), getNodeSource(), DIRECTION.IN,
         "fixing %d conflicts found during committing transaction against db=%s...", tasks.size(), database.getName());
 
     ODatabaseRecordThreadLocal.INSTANCE.set(database);
     try {
+      OScenarioThreadLocal.executeAsDistributed(new Callable<Object>() {
+        @Override
+        public Object call() throws Exception {
+          for (OAbstractRemoteTask task : tasks) {
+            if (task instanceof OAbstractRecordReplicatedTask)
+              // AVOID LOCKING RECORDS AGAIN BECAUSE ARE ALREADY LOCKED
+              ((OAbstractRecordReplicatedTask) task).setLockRecord(false);
 
-      for (OAbstractRemoteTask task : tasks) {
-        task.execute(iServer, iManager, database);
-      }
+            task.execute(iServer, iManager, database);
+          }
+          return null;
+        }
+      });
 
     } catch (Exception e) {
+      OLogManager.instance().error(this, "Exception during attempt to fix inconsistency between nodes", e);
       return Boolean.FALSE;
     } finally {
       // UNLOCK ALL RIDS IN ANY CASE
       final ODistributedDatabase ddb = iManager.getMessageService().getDatabase(database.getName());
-      for (ORID r : locks)
-        ddb.unlockRecord(r);
+      if (locks != null)
+        for (ORID r : locks)
+          ddb.unlockRecord(r);
     }
 
     return Boolean.TRUE;
@@ -99,9 +113,12 @@ public class OFixTxTask extends OAbstractRemoteTask {
     for (OAbstractRemoteTask task : tasks)
       out.writeObject(task);
     // LOCKS
-    out.writeInt(locks.size());
-    for (ORID r : locks)
-      out.writeObject(r);
+    if (locks != null) {
+      out.writeInt(locks.size());
+      for (ORID r : locks)
+        out.writeObject(r);
+    } else
+      out.writeInt(0);
   }
 
   @Override
@@ -109,9 +126,10 @@ public class OFixTxTask extends OAbstractRemoteTask {
     // TASKS
     final int size = in.readInt();
     for (int i = 0; i < size; ++i)
-      tasks.add((OAbstractRecordReplicatedTask) in.readObject());
+      tasks.add((OAbstractRemoteTask) in.readObject());
     // LOCKS
     final int lockSize = in.readInt();
+    locks = new HashSet<ORID>(lockSize);
     for (int i = 0; i < lockSize; ++i)
       locks.add((ORID) in.readObject());
   }

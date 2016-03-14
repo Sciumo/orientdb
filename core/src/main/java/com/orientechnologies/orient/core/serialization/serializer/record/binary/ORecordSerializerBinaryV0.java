@@ -39,6 +39,7 @@ import com.orientechnologies.orient.core.db.document.ODatabaseDocument;
 import com.orientechnologies.orient.core.db.record.OIdentifiable;
 import com.orientechnologies.orient.core.db.record.ORecordLazyList;
 import com.orientechnologies.orient.core.db.record.ORecordLazyMap;
+import com.orientechnologies.orient.core.db.record.ORecordLazyMultiValue;
 import com.orientechnologies.orient.core.db.record.ORecordLazySet;
 import com.orientechnologies.orient.core.db.record.OTrackedList;
 import com.orientechnologies.orient.core.db.record.OTrackedMap;
@@ -46,6 +47,7 @@ import com.orientechnologies.orient.core.db.record.OTrackedSet;
 import com.orientechnologies.orient.core.db.record.ridbag.ORidBag;
 import com.orientechnologies.orient.core.exception.ODatabaseException;
 import com.orientechnologies.orient.core.exception.OSerializationException;
+import com.orientechnologies.orient.core.exception.OValidationException;
 import com.orientechnologies.orient.core.id.ORID;
 import com.orientechnologies.orient.core.id.ORecordId;
 import com.orientechnologies.orient.core.metadata.schema.OClass;
@@ -491,7 +493,7 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
   }
 
   @SuppressWarnings("unchecked")
-  private int writeSingleValue(BytesContainer bytes, Object value, OType type, OType linkedType) {
+  private int writeSingleValue(final BytesContainer bytes, Object value, final OType type, final OType linkedType) {
     int pointer = 0;
     switch (type) {
     case INTEGER:
@@ -566,6 +568,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
       pointer = writeLinkCollection(bytes, ridCollection);
       break;
     case LINK:
+      if (!(value instanceof OIdentifiable))
+        throw new OValidationException("Value '" + value + "' is not a OIdentifiable");
+
       pointer = writeOptimizedLink(bytes, (OIdentifiable) value);
       break;
     case LINKMAP:
@@ -591,10 +596,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     return pointer;
   }
 
-  private int writeBinary(BytesContainer bytes, byte[] valueBytes) {
-    int pointer;
-    pointer = OVarIntSerializer.write(bytes, valueBytes.length);
-    int start = bytes.alloc(valueBytes.length);
+  private int writeBinary(final BytesContainer bytes, final byte[] valueBytes) {
+    final int pointer = OVarIntSerializer.write(bytes, valueBytes.length);
+    final int start = bytes.alloc(valueBytes.length);
     System.arraycopy(valueBytes, 0, bytes.bytes, start, valueBytes.length);
     return pointer;
   }
@@ -617,10 +621,10 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
   @SuppressWarnings("unchecked")
   private int writeEmbeddedMap(BytesContainer bytes, Map<Object, Object> map) {
-    int[] pos = new int[map.size()];
+    final int[] pos = new int[map.size()];
     int i = 0;
     Entry<Object, Object> values[] = new Entry[map.size()];
-    int fullPos = OVarIntSerializer.write(bytes, map.size());
+    final int fullPos = OVarIntSerializer.write(bytes, map.size());
     for (Entry<Object, Object> entry : map.entrySet()) {
       // TODO:check skip of complex types
       // FIXME: changed to support only string key on map
@@ -634,9 +638,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
 
     for (i = 0; i < values.length; i++) {
       int pointer = 0;
-      Object value = values[i].getValue();
+      final Object value = values[i].getValue();
       if (value != null) {
-        OType type = getTypeFromValueEmbedded(value);
+        final OType type = getTypeFromValueEmbedded(value);
         if (type == null) {
           throw new OSerializationException("Impossible serialize value of type " + value.getClass()
               + " with the ODocument binary serializer");
@@ -689,21 +693,36 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
     return pos;
   }
 
-  private int writeLinkCollection(BytesContainer bytes, Collection<OIdentifiable> value) {
+  private int writeLinkCollection(final BytesContainer bytes, final Collection<OIdentifiable> value) {
     assert (!(value instanceof OMVRBTreeRIDSet));
-    int pos = OVarIntSerializer.write(bytes, value.size());
-    for (OIdentifiable itemValue : value) {
-      // TODO: handle the null links
-      if (itemValue == null)
-        writeNullLink(bytes);
-      else
-        writeOptimizedLink(bytes, itemValue);
+    final int pos = OVarIntSerializer.write(bytes, value.size());
+
+    final boolean disabledAutoConvertion = value instanceof ORecordLazyMultiValue
+        && ((ORecordLazyMultiValue) value).isAutoConvertToRecord();
+
+    if (disabledAutoConvertion)
+      // AVOID TO FETCH RECORD
+      ((ORecordLazyMultiValue) value).setAutoConvertToRecord(false);
+
+    try {
+      for (OIdentifiable itemValue : value) {
+        // TODO: handle the null links
+        if (itemValue == null)
+          writeNullLink(bytes);
+        else
+          writeOptimizedLink(bytes, itemValue);
+      }
+
+    } finally {
+      if (disabledAutoConvertion)
+        ((ORecordLazyMultiValue) value).setAutoConvertToRecord(true);
     }
+
     return pos;
   }
 
-  private int writeEmbeddedCollection(BytesContainer bytes, Collection<?> value, OType linkedType) {
-    int pos = OVarIntSerializer.write(bytes, value.size());
+  private int writeEmbeddedCollection(final BytesContainer bytes, final Collection<?> value, final OType linkedType) {
+    final int pos = OVarIntSerializer.write(bytes, value.size());
     // TODO manage embedded type from schema and auto-determined.
     writeOType(bytes, bytes.alloc(1), OType.ANY);
     for (Object itemValue : value) {
@@ -735,9 +754,9 @@ public class ORecordSerializerBinaryV0 implements ODocumentSerializer {
       if (prop != null)
         type = prop.getType();
 
-      if (type == null || OType.ANY == type)
-        type = OType.getTypeByValue(entry.value);
     }
+    if (type == null || OType.ANY == type)
+      type = OType.getTypeByValue(entry.value);
     return type;
   }
 

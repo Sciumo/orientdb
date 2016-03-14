@@ -24,6 +24,7 @@ import com.orientechnologies.orient.core.db.record.OMultiValueChangeEvent;
 import com.orientechnologies.orient.core.db.record.ORecordElement;
 import com.orientechnologies.orient.core.metadata.schema.OType;
 import com.orientechnologies.orient.core.record.impl.ODocument;
+import com.orientechnologies.orient.core.sql.OCommandExecutorSQLCreateIndex;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
@@ -83,7 +84,7 @@ public class OCompositeIndexDefinition extends OAbstractIndexDefinition {
         if (multiValueDefinitionIndex == -1)
           multiValueDefinitionIndex = indexDefinitions.size() - 1;
         else
-          throw new OIndexException("Composite key can not contain more than one collection item");
+          throw new OIndexException("Composite key cannot contain more than one collection item");
     }
 
     className = iClassName;
@@ -108,7 +109,7 @@ public class OCompositeIndexDefinition extends OAbstractIndexDefinition {
       if (multiValueDefinitionIndex == -1)
         multiValueDefinitionIndex = indexDefinitions.size() - 1;
       else
-        throw new OIndexException("Composite key can not contain more than one collection item");
+        throw new OIndexException("Composite key cannot contain more than one collection item");
     }
 
     collate.addCollate(indexDefinition.getCollate());
@@ -261,7 +262,7 @@ public class OCompositeIndexDefinition extends OAbstractIndexDefinition {
           compositeKeys.add(compositeKey);
         }
       else
-        throw new OIndexException("Composite key can not contain more than one collection item");
+        throw new OIndexException("Composite key cannot contain more than one collection item");
 
       int compositeIndex = 0;
       for (final Object keyItem : collectionKey) {
@@ -393,7 +394,7 @@ public class OCompositeIndexDefinition extends OAbstractIndexDefinition {
   /**
    * {@inheritDoc}
    */
-  public String toCreateIndexDDL(final String indexName, final String indexType) {
+  public String toCreateIndexDDL(final String indexName, final String indexType, String engine) {
     final StringBuilder ddl = new StringBuilder("create index ");
     ddl.append(indexName).append(" on ").append(className).append(" ( ");
 
@@ -405,6 +406,9 @@ public class OCompositeIndexDefinition extends OAbstractIndexDefinition {
       }
     }
     ddl.append(" ) ").append(indexType).append(' ');
+
+    if (engine != null)
+      ddl.append(OCommandExecutorSQLCreateIndex.KEYWORD_ENGINE + " " + engine).append(' ');
 
     if (multiValueDefinitionIndex == -1) {
       boolean first = true;
